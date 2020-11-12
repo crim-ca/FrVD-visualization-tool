@@ -1,0 +1,14 @@
+## IDE
+.idea/
+.vscode/
+
+## Data
+*.avi
+*.csv
+*.jp[e]g
+*.json
+*.log
+*.mp4
+*.png
+*.tif[f]
+
