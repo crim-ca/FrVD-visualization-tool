@@ -74,6 +74,57 @@ def parse_text_inference_metadata(metadata_path, playback):
     return None
 
 
+class App:
+    def __init__(self, window, window_title, video_source=0):
+        self.window = window
+        self.window.title(window_title)
+
+        self.video_source = video_source
+        self.video = cv.VideoCapture(self.video_source)
+        fps = int(self.playback["video"].get(cv.CAP_PROP_FPS))
+        self.playback = {
+            "video": self.video,
+            "time": 0.0,
+            "duration": self.playback["frame_msec"] * self.playback["frame_count"],
+            "fps": fps,
+            "frame": 0,
+            "frame_count": int(self.video.get(cv.CAP_PROP_FRAME_COUNT)),
+            "frame_msec": 1. / float(fps) * 1000.,
+        }
+
+        # Create a canvas that can fit the above video source size
+        self.canvas = tk.Canvas(window, width=self.video.width, height=self.video.height)
+        self.canvas.pack()
+
+        # Button that lets the user take a snapshot
+        self.btn_snapshot = tk.Button(window, text="Snapshot", width=50, command=self.snapshot)
+        self.btn_snapshot.pack(anchor=tk.CENTER, expand=True)
+
+        # After it is called once, the update method will be automatically called every delay milliseconds
+        self.delay =
+        self.update()
+
+        self.window.mainloop()
+
+    def snapshot(self):
+        # Get a frame from the video source
+        ret, frame = self.video.read()
+
+        if ret:
+            cv.imwrite("frame-" + time.strftime("%d-%m-%Y-%H-%M-%S") + ".jpg", cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+
+
+    def update(self):
+        # Get a frame from the video source
+        ret, frame = self.vid.get_frame()
+
+        if ret:
+            self.photo = PIL.ImageTk.PhotoImage(image=PIL.Image.fromarray(frame))
+            self.canvas.create_image(0, 0, image=self.photo, anchor=tkinter.NW)
+
+        self.window.after(self.delay, self.update)
+
+
 def run(video_file, video_annotations, video_results, text_results):
     video_file = os.path.abspath(video_file)
     if not os.path.isfile(video_file):
@@ -114,6 +165,44 @@ def run(video_file, video_annotations, video_results, text_results):
     if text_results and os.path.isfile(text_results):
         LOGGER.info("Parsing text inference metadata [%s]...", text_results)
         parse_text_inference_metadata(text_results, playback)
+
+    text_display = "TEST TEST"
+
+    root = tk.Tk()
+    scroll = tk.Scrollbar(root)
+    textbox = tk.Text(root, height=4, width=50)
+    scroll.pack(side=tk.RIGHT, fill=tk.Y)
+    textbox.pack(side=tk.LEFT, fill=tk.Y)
+    scroll.config(command=textbox.yview)
+    textbox.config(yscrollcommand=scroll.set)
+    textbox.insert(tk.END, "TEST TEST")
+
+    text1 = tk.Text(root, height=20, width=30)
+    photo = tk.PhotoImage(file='./William_Shakespeare.gif')
+    text1.insert(tk.END, '\n')
+    text1.image_create(tk.END, image=photo)
+
+    text1.pack(side=tk.LEFT)
+
+    text2 = tk.Text(root, height=20, width=50)
+    scroll = tk.Scrollbar(root, command=text2.yview)
+    text2.configure(yscrollcommand=scroll.set)
+    text2.tag_configure('bold_italics', font=('Arial', 12, 'bold', 'italic'))
+    text2.tag_configure('big', font=('Verdana', 20, 'bold'))
+    text2.tag_configure('color',
+                        foreground='#476042',
+                        font=('Tempus Sans ITC', 12, 'bold'))
+    text2.tag_bind('follow',
+                   '<1>',
+                   lambda e, t=text2: t.insert(tk.END, "Not now, maybe later!"))
+    text2.insert(tk.END, '\nWilliam Shakespeare\n', 'big')
+    text2.insert(tk.END, text_display, "color")
+    text2.insert(tk.END, "follow-up\n", "follow")
+    text2.pack(side=tk.LEFT)
+    scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+
+    tk.mainloop()
 
     LOGGER.info("Playing...")
     ret = True
