@@ -14,3 +14,31 @@ The script takes as input the following information and displays them for corres
 [metadata_extract]: https://www.crim.ca/stash/projects/FAR/repos/data-extraction/ 
 [text_results]: https://www.crim.ca/stash/projects/FAR/repos/annotation-vd/
 [video_infer]: https://www.crim.ca/stash/projects/FAR/repos/video-action-recognition/
+
+
+## Expected Formats of Metadata
+
+
+### Video-description Annotation Metadata
+
+
+### Video Action Recognition Inference Metadata
+
+``` json 
+{
+    "command": "<command>",
+    "model": "<model_name>",
+    "sample_count": <sample_count>,
+    "predictions": [
+        {
+            "segment": "<video>",
+            "name": "<name>",
+            "start": <seconds-time-start>,
+            "end": <seconds-time-end>,
+            "part": "<frame>/<sample_count>",
+            "classes": [ "a", "b", "c", "d", "e" ],
+            "scores": [ 0.60, 0.20, 0.10, 0.03, 0.02 ]
+        }
+    ]
+}
+```
