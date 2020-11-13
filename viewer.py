@@ -183,19 +183,28 @@ class VideoResultPlayerApp(object):
         self.play_state = not self.play_state
 
     def update_annotation(self, metadata):
-        text = metadata["vd"]
+        if metadata is None:
+            text = "<no-data>"
+        else:
+            text = metadata["vd"]
         self.video_annot_textbox.delete("1.0", tk.END)
         self.video_annot_textbox.insert(tk.END, text, "normal")
 
     def update_infer_video(self, metadata):
-        header = "[Score] [Classes] (ordered)\n\n  "
-        values = "\n  ".join(["[{:.2f}]  {})".format(s, c) for c, s in zip(metadata["classes"], metadata["scores"])])
-        text = header + values
+        if metadata is None:
+            text = "<no-data>"
+        else:
+            header = "[Score] [Classes] (ordered)\n\n  "
+            values = "\n  ".join(["[{:.2f}]  {})".format(s, c) for c, s in zip(metadata["classes"], metadata["scores"])])
+            text = header + values
         self.video_infer_textbox.delete("1.0", tk.END)
         self.video_infer_textbox.insert(tk.END, text, "normal")
 
     def update_infer_text(self, metadata):
-        text = json.dumps(metadata, indent=2, ensure_ascii=False)
+        if metadata is None:
+            text = "<no-data>"
+        else:
+            text = json.dumps(metadata, indent=2, ensure_ascii=False)
         self.text_infer_textbox.delete("1.0", tk.END)
         self.text_infer_textbox.insert(tk.END, text, "normal")
 
