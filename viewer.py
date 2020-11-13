@@ -41,23 +41,26 @@ def setup_text_window():
 
 class VideoResultPlayerApp(object):
     """
-    BUilds and runs the player by looping video frames and handling events.
+    Builds and runs the player by looping video frames and handling events.
     """
     # flags and control
     error = False
     # video information
     video = None
+    video_scale = 1.0
     video_width = None
     video_height = None
     video_frame = None
-    duration = None
-    fps = None
+    video_duration = None
     frame = None
+    frame_fps = 0
     frame_time = 0
+    frame_delta = None
     frame_index = None
     frame_count = None
     frame_output = None
     last_time = 0
+    next_time = 0
     # metadata references
     video_annot_meta = None
     video_annot_index = None
@@ -87,7 +90,7 @@ class VideoResultPlayerApp(object):
     font_code = ("Courier", 12, "normal")
     font_normal = ("Arial", 12, "normal")
 
-    def __init__(self, video_file, video_annotations, video_results, text_results, output=None):
+    def __init__(self, video_file, video_annotations, video_results, text_results, output=None, scale=1.0):
         self.video_source = os.path.abspath(video_file)
         if not os.path.isfile(video_file):
             raise ValueError("Cannot find video file: [{}]".format(video_file))
@@ -95,6 +98,9 @@ class VideoResultPlayerApp(object):
         # use video name as best title minimally available, adjust after if possible with metadata
         self.video_title = os.path.splitext(os.path.split(video_file)[-1])[0]
         self.frame_output = output
+        self.video_scale = scale
+        if scale <= 0:
+            raise ValueError("Invalid scaling must be greater than 0.")
 
         self.setup_player()
         self.setup_window()
@@ -117,19 +123,22 @@ class VideoResultPlayerApp(object):
         self.video = cv.VideoCapture(self.video_source)
         self.frame_index = 0
         self.frame_time = 0.0
-        self.fps = int(self.video.get(cv.CAP_PROP_FPS))
+        self.frame_fps = int(self.video.get(cv.CAP_PROP_FPS))
+        self.frame_delta = 1. / float(self.frame_fps) * 1000.
         self.frame_count = int(self.video.get(cv.CAP_PROP_FRAME_COUNT))
-        self.duration = self.frame_delta * self.frame_count
-        self.video_width = self.video.get(cv.CAP_PROP_FRAME_WIDTH)
-        self.video_height = self.video.get(cv.CAP_PROP_FRAME_HEIGHT)
+        self.video_duration = self.frame_delta * self.frame_count
+        self.video_width = int(self.video.get(cv.CAP_PROP_FRAME_WIDTH))
+        self.video_height = int(self.video.get(cv.CAP_PROP_FRAME_HEIGHT))
 
     def setup_window(self):
         self.window = tk.Tk()
         self.window.title("Result Viewer")
         # Create a canvas that can fit the above video source size
-        self.video_viewer = tk.Canvas(self.window, width=self.video_width, height=self.video_height)
+        display_width = self.video_width * self.video_scale
+        display_height = self.video_height * self.video_scale
+        self.video_viewer = tk.Canvas(self.window, width=display_width, height=display_height)
         self.video_viewer.pack(anchor=tk.NW)
-        self.video_slider = tk.Scale(self.window, from_=0, to=self.frame_count - 1, length=self.video_width,
+        self.video_slider = tk.Scale(self.window, from_=0, to=self.frame_count - 1, length=display_width,
                                      tickinterval=self.frame_count // 10, orient=tk.HORIZONTAL, command=self.seek_frame)
         self.video_slider.pack(side=tk.LEFT)
 
@@ -154,11 +163,11 @@ class VideoResultPlayerApp(object):
         self.video_infer_textbox.tag_configure("code", font=self.font_code)
         self.video_infer_textbox.tag_configure("normal", foreground='#476042', font=self.font_normal)
         self.video_infer_textbox.insert(tk.END, "<nodata>", "code")
-        self.video_infer_textbox.pack(side=tk.LEFT)
+        self.video_infer_textbox.pack(side=tk.BOTTOM)
         self.video_infer_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.text_infer_label = tk.Label(self.window, text="Text Inference Metadata", font=self.font_header)
-        self.text_infer_label.pack(side=tk.LEFT)
+        self.text_infer_label.pack(side=tk.BOTTOM)
         self.text_infer_textbox = tk.Text(self.window, height=20, width=50)
         self.text_infer_scroll = tk.Scrollbar(self.window, command=self.text_infer_textbox.yview)
         self.text_infer_textbox.configure(yscrollcommand=self.text_infer_scroll.set)
@@ -199,8 +208,8 @@ class VideoResultPlayerApp(object):
         if metadata is None:
             text = "<no-data>"
         else:
-            header = "[Score] [Classes] (ordered)\n\n  "
-            values = "\n  ".join(["[{:.2f}]  {})".format(s, c) for c, s in zip(metadata["classes"], metadata["scores"])])
+            header = "[Score] [Classes]\n\n  "
+            values = "\n  ".join(["[{:.2f}] {})".format(s, c) for c, s in zip(metadata["classes"], metadata["scores"])])
             text = header + values
         self.video_infer_textbox.delete("1.0", tk.END)
         self.video_infer_textbox.insert(tk.END, text, "normal")
@@ -213,52 +222,79 @@ class VideoResultPlayerApp(object):
         self.text_infer_textbox.delete("1.0", tk.END)
         self.text_infer_textbox.insert(tk.END, text, "normal")
 
-    def update_metadata(self):
-        if self.video_annot_meta:
-            current_meta = self.video_annot_meta[self.video_annot_index]
-            if self.frame_time > current_meta["end_ms"]:
-                if self.video_annot_index < len(self.video_annot_meta) - 1:
-                    self.video_annot_index += 1
-                    self.update_annotation(self.video_annot_meta[self.video_annot_index])
+    def update_metadata(self, seek=False):
+        def update_meta(meta_container, meta_index, meta_updater):
+            """
+            Updates the view element with the next metadata if the time for it to change was reached.
+            If seek was requested, searches from the start to find the applicable metadata.
+
+            :param meta_container: all possible metadata entries, assumed ascending pre-ordered by 'start_ms' key.
+            :param meta_index: active metadata index
+            :param meta_updater: method that updates the view element for the found metadata entry
+            :return: index of updated metadata or already active one if time is still applicable for current metadata
+            """
+            # update only if metadata container entries are available
+            if meta_container:
+                current_index = 0 if seek else meta_index
+                updated_index = current_index  # if nothing needs to change (current on is still valid for timestamp)
+                current_meta = meta_container[current_index]
+                index_total = len(meta_container)
+                if seek:
+                    # search the earliest index that provides metadata within the new time
+                    for index in range(index_total):
+                        if self.frame_time >= current_meta["start_ms"]:
+                            updated_index = index
+                            break
+                elif self.frame_time > current_meta["end_ms"]:
+                    # otherwise bump to next one if timestamp of the current is passed
+                    updated_index = current_index + 1
+
+                if meta_index < index_total - 1:
+                    meta_updater(meta_container[updated_index])
                 else:
-                    self.update_annotation(None)
-        if self.video_infer_meta:
-            current_meta = self.video_infer_meta[self.video_infer_index]
-            if self.frame_time > current_meta["end_ms"]:
-                if self.video_infer_index < len(self.video_infer_meta) - 1:
-                    self.video_infer_index += 1
-                    self.update_infer_video(self.video_infer_meta[self.video_infer_index])
-                else:
-                    self.update_infer_video(None)
-        if self.text_infer_meta:
-            current_meta = self.text_infer_meta[self.text_infer_index]
-            if self.frame_time > current_meta["end_ms"]:
-                if self.text_infer_index < len(self.text_infer_meta) - 1:
-                    self.text_infer_index += 1
-                    self.update_infer_text(self.text_infer_meta[self.text_infer_index])
-                else:
-                    self.update_infer_text(None)
+                    meta_updater(None)
+                return updated_index
+            return None
+
+        self.video_annot_index = update_meta(self.video_annot_meta, self.video_annot_index, self.update_annotation)
+        self.video_infer_index = update_meta(self.video_infer_meta, self.video_infer_index, self.update_infer_video)
+        self.text_infer_index = update_meta(self.text_infer_meta, self.text_infer_index, self.update_infer_text)
 
     def update_video(self):
         """
         Periodic update of video frame. Self-calling.
         """
+        self.next_time = time.perf_counter()
 
         if not self.play_state:
             self.window.after(30, self.update_video)
             return
 
-        LOGGER.debug("Frame: %s, Real FPS: %s", self.frame_index, self.frame_time - self.last_time)
         ret, frame = self.video.read()
         if not ret:
             LOGGER.error("Playback error occurred when reading next video frame.")
             self.error = True
             return
+        frame_dims = (self.video_width, self.video_height)
+        if self.video_scale != 1:
+            frame_dims = (int(self.video_width * self.video_scale), int(self.video_height * self.video_scale))
+            frame = cv.resize(frame, frame_dims, interpolation=cv.INTER_NEAREST)
 
         self.frame_index = int(self.video.get(cv.CAP_PROP_POS_FRAMES))
-        self.last_time = self.frame_time
         self.frame_time = self.video.get(cv.CAP_PROP_POS_MSEC)
         self.update_metadata()
+
+        # default if cannot be inferred from previous time
+        next_time = time.perf_counter()
+        call_time_delta = next_time - self.last_time
+        self.last_time = next_time
+        wait_time_delta = 0 if call_time_delta > self.frame_delta else max(self.frame_delta - call_time_delta, 0)
+        fps = 1. / call_time_delta
+        LOGGER.debug("Frame: %8s, Last: %8.2f, Time: %8.2f, Real Delta: %6.2fms, "
+                     "Call Delta: %6.2fms, Target Delta: %6.2fms, Real FPS: %6.2f WxH: %sx%s",
+                     self.frame_index, self.last_time, self.frame_time, wait_time_delta,
+                     call_time_delta * 1000., self.frame_delta, fps, frame_dims[0], frame_dims[1])
+        wait_time_delta = 1
 
         # display basic information
         text_position = (10, 25)
@@ -266,24 +302,31 @@ class VideoResultPlayerApp(object):
         font_scale = 0.5
         font_color = (209, 80, 0, 255)
         font_stroke = 1
-        cv.putText(frame, "Title: {}, FPS: {}, Frame: {}".format(self.video_title, self.fps, self.frame_index),
-                   text_position, cv.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_stroke)
+        text = "Title: {}, Target FPS: {}, Real FPS: {:0.2f}".format(self.video_title, self.frame_fps, fps)
+        cv.putText(frame, text, text_position, cv.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_stroke)
         text_position = (text_position[0], text_position[1] + int(text_delta * font_scale))
         cur_sec = self.frame_time / 1000.
-        tot_sec = self.duration / 1000.
+        tot_sec = self.video_duration / 1000.
         cur_hms = time.strftime("%H:%M:%S", time.gmtime(cur_sec))
         tot_hms = time.strftime("%H:%M:%S", time.gmtime(tot_sec))
-        cv.putText(frame, "Time: {:0>.2f}/{:0.2f} ({}/{})".format(cur_sec, tot_sec, cur_hms, tot_hms),
-                   text_position, cv.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_stroke)
+        text = "Time: {:0>.2f}/{:0.2f} ({}/{}) Frame: {}".format(cur_sec, tot_sec, cur_hms, tot_hms, self.frame_index)
+        cv.putText(frame, text, text_position, cv.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_stroke)
 
         # note: 'self.frame' is important as without instance reference, it gets garbage collected and is not displayed
         self.video_frame = frame  # in case of snapshot
-        self.frame = PIL.ImageTk.PhotoImage(image=PIL.Image.fromarray(frame))
+        self.frame = PIL.ImageTk.PhotoImage(image=PIL.Image.fromarray(cv.cvtColor(frame, cv.COLOR_RGB2BGR)))
         self.video_viewer.create_image(0, 0, image=self.frame, anchor=tk.NW)
-        self.window.after(math.floor(self.frame_delta), self.update_video)
+        self.video_slider.set(self.frame_index)
+        self.window.after(math.floor(wait_time_delta), self.update_video)
 
     def seek_frame(self, frame_index):
-
+        """
+        Moves the video to the given frame index and fetches metadata starting at that moment.
+        """
+        self.frame_index = int(frame_index)
+        self.video.set(cv.CAP_PROP_POS_FRAMES, self.frame_index)
+        self.frame_time = self.video.get(cv.CAP_PROP_POS_MSEC)
+        self.update_metadata(seek=True)
 
     def setup_metadata(self, video_annotations, video_results, text_results):
         """
@@ -360,10 +403,6 @@ class VideoResultPlayerApp(object):
             LOGGER.error("Could not parse text inference metadata file: [%s]", metadata_path, exc_info=exc)
         return None
 
-    @property
-    def frame_delta(self):
-        return 1. / float(self.fps) * 1000.
-
     def snapshot(self):
         """
         Save current frame of the video with corresponding metadata.
@@ -376,7 +415,7 @@ class VideoResultPlayerApp(object):
         frame_name = "{}_{}_{:.2f}.jpg".format(name_clean, self.frame_index, self.frame_time)
         os.makedirs(self.frame_output, exist_ok=True)
         frame_path = os.path.join(self.frame_output, frame_name)
-        cv.imwrite(frame_path, cv.cvtColor(self.video_frame, cv.COLOR_RGB2BGR))
+        cv.imwrite(frame_path, self.video_frame)
         LOGGER.info("Saved frame snapshot: [%s]", frame_path)
 
 
@@ -387,6 +426,8 @@ def make_parser():
     ap.add_argument("video_results", help="JSON metadata file with video actions inference results.")
     ap.add_argument("text_results", help="JSON metadata file with text subjects and verbs results.")
     ap.add_argument("--output", "-o", help="Output location of frame snapshots.", default="/tmp/video-result-viewer")
+    ap.add_argument("--scale", "-s", type=float, default=1.0,
+                    help="Scale video for bigger/smaller display (warning: impacts FPS).")
     ap.add_argument("--debug", "-d", action="store_true", help="Debug logging.")
     return ap
 
