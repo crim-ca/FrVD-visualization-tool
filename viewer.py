@@ -2,6 +2,7 @@
 Minimalistic video player that allows visualization and easier interpretation of FAR-VVD results.
 """
 import argparse
+import datetime
 import json
 import logging
 import math
@@ -67,6 +68,7 @@ class VideoResultPlayerApp(object):
     # handles to UI elements
     window = None
     video_viewer = None
+    video_slider = None
     video_annot_label = None
     video_annot_scroll = None
     video_annot_textbox = None
@@ -127,6 +129,9 @@ class VideoResultPlayerApp(object):
         # Create a canvas that can fit the above video source size
         self.video_viewer = tk.Canvas(self.window, width=self.video_width, height=self.video_height)
         self.video_viewer.pack(anchor=tk.NW)
+        self.video_slider = tk.Scale(self.window, from_=0, to=self.frame_count - 1, length=self.video_width,
+                                     tickinterval=self.frame_count // 10, orient=tk.HORIZONTAL, command=self.seek_frame)
+        self.video_slider.pack(side=tk.LEFT)
 
         self.video_annot_label = tk.Label(self.window, text="Video Annotation Metadata", font=self.font_header)
         self.video_annot_label.pack(side=tk.LEFT)
@@ -264,7 +269,11 @@ class VideoResultPlayerApp(object):
         cv.putText(frame, "Title: {}, FPS: {}, Frame: {}".format(self.video_title, self.fps, self.frame_index),
                    text_position, cv.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_stroke)
         text_position = (text_position[0], text_position[1] + int(text_delta * font_scale))
-        cv.putText(frame, "Time: {:0>.2f}/{:0.2f}".format(self.frame_time / 1000., self.duration / 1000.),
+        cur_sec = self.frame_time / 1000.
+        tot_sec = self.duration / 1000.
+        cur_hms = time.strftime("%H:%M:%S", time.gmtime(cur_sec))
+        tot_hms = time.strftime("%H:%M:%S", time.gmtime(tot_sec))
+        cv.putText(frame, "Time: {:0>.2f}/{:0.2f} ({}/{})".format(cur_sec, tot_sec, cur_hms, tot_hms),
                    text_position, cv.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_stroke)
 
         # note: 'self.frame' is important as without instance reference, it gets garbage collected and is not displayed
@@ -272,6 +281,9 @@ class VideoResultPlayerApp(object):
         self.frame = PIL.ImageTk.PhotoImage(image=PIL.Image.fromarray(frame))
         self.video_viewer.create_image(0, 0, image=self.frame, anchor=tk.NW)
         self.window.after(math.floor(self.frame_delta), self.update_video)
+
+    def seek_frame(self, frame_index):
+
 
     def setup_metadata(self, video_annotations, video_results, text_results):
         """
