@@ -103,6 +103,7 @@ class VideoResultPlayerApp(object):
     frame = None
     frame_fps = 0
     frame_time = 0
+    frame_queue = 128
     frame_delta = None
     frame_index = None
     frame_count = None
@@ -138,7 +139,7 @@ class VideoResultPlayerApp(object):
     font_code = ("Courier", 12, "normal")
     font_normal = ("Arial", 12, "normal")
 
-    def __init__(self, video_file, video_annotations, video_results, text_results, output=None, scale=1.0):
+    def __init__(self, video_file, video_annotations, video_results, text_results, output=None, scale=1.0, queue=128):
         self.video_source = os.path.abspath(video_file)
         if not os.path.isfile(video_file):
             raise ValueError("Cannot find video file: [{}]".format(video_file))
@@ -149,6 +150,9 @@ class VideoResultPlayerApp(object):
         self.video_scale = scale
         if scale <= 0:
             raise ValueError("Invalid scaling must be greater than 0.")
+        if queue > 1:
+            LOGGER.debug("Setting queue size: %s", queue)
+            self.frame_queue = queue
 
         self.setup_player()
         self.setup_window()
@@ -164,7 +168,7 @@ class VideoResultPlayerApp(object):
 
     def setup_player(self):
         LOGGER.info("Creating player...")
-        self.video = VideoCaptureThread(self.video_source).start()
+        self.video = VideoCaptureThread(self.video_source, queue_size=self.frame_queue).start()
         self.frame_index = 0
         self.frame_time = 0.0
         self.frame_fps = int(self.video.get(cv.CAP_PROP_FPS))
@@ -354,12 +358,12 @@ class VideoResultPlayerApp(object):
         next_time = time.perf_counter()
         call_time_delta = next_time - self.last_time
         self.last_time = next_time
-        wait_time_delta = 0 if call_time_delta > self.frame_delta else max(self.frame_delta - call_time_delta, 0)
+        wait_time_delta = 1 if call_time_delta > self.frame_delta else max(self.frame_delta - call_time_delta, 0)
         fps = 1. / call_time_delta
-        #LOGGER.debug("Frame: %8s, Last: %8.2f, Time: %8.2f, Real Delta: %6.2fms, "
-        #             "Call Delta: %6.2fms, Target Delta: %6.2fms, Real FPS: %6.2f WxH: %s",
-        #             self.frame_index, self.last_time, self.frame_time, wait_time_delta,
-        #             call_time_delta * 1000., self.frame_delta, fps, frame_dims)
+        LOGGER.debug("Frame: %8s, Last: %8.2f, Time: %8.2f, Real Delta: %6.2fms, "
+                     "Call Delta: %6.2fms, Target Delta: %6.2fms, Real FPS: %6.2f WxH: %s",
+                     self.frame_index, self.last_time, self.frame_time, wait_time_delta,
+                     call_time_delta * 1000., self.frame_delta, fps, frame_dims)
 
         # display basic information
         text_position = (10, 25)
@@ -487,14 +491,26 @@ class VideoResultPlayerApp(object):
 
 def make_parser():
     ap = argparse.ArgumentParser(prog=__NAME__, description=__doc__, add_help=True)
-    ap.add_argument("video_file", help="Video file to view.")
-    ap.add_argument("video_annotations", help="JSON metadata file with original video-description annotations.")
-    ap.add_argument("video_results", help="JSON metadata file with video actions inference results.")
-    ap.add_argument("text_results", help="JSON metadata file with text subjects and verbs results.")
-    ap.add_argument("--output", "-o", help="Output location of frame snapshots.", default="/tmp/video-result-viewer")
-    ap.add_argument("--scale", "-s", type=float, default=1.0,
-                    help="Scale video for bigger/smaller display (warning: impacts FPS).")
-    ap.add_argument("--debug", "-d", action="store_true", help="Debug logging.")
+    main_args = ap.add_argument_group(title="Main Arguments",
+                                      description="Main arguments")
+    main_args.add_argument("video_file", help="Video file to view.")
+    main_args.add_argument("--video-description", "--vd", dest="video_annotations",
+                           help="JSON metadata file with original video-description annotations.")
+    main_args.add_argument("--video-inference", "--vi", dest="video_results",
+                           help="JSON metadata file with video actions inference results.")
+    main_args.add_argument("--text-inference", "--ti", dest="text_results",
+                           help="JSON metadata file with text subjects and verbs results.")
+    util_opts = ap.add_argument_group(title="Utility Options",
+                                      description="Options that configure extra functionalities.")
+    util_opts.add_argument("--output", "-o", default="/tmp/video-result-viewer",
+                           help="Output location of frame snapshots.")
+    video_opts = ap.add_argument_group(title="Video Options",
+                                       description="Options that configure video processing.")
+    video_opts.add_argument("--scale", "-s", type=float, default=1.0,
+                            help="Scale video for bigger/smaller display (warning: impacts FPS).")
+    video_opts.add_argument("--queue", "-q", type=int, default=128,
+                            help="Queue size to attempt preloading frames (warning: impacts FPS).")
+    video_opts.add_argument("--debug", "-d", action="store_true", help="Debug logging.")
     return ap
 
 
