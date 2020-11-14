@@ -186,28 +186,46 @@ class VideoResultPlayerApp(object):
 
     def setup_window(self):
         self.window = tk.Tk()
-        self.window.title("Result Viewer")
+        self.window.title("Video Result Viewer: {}".format(self.video_title))
+        self.window.attributes("-fullscreen", False)
+        self.window.bind("<F11>",
+                         lambda event: self.window.attributes("-fullscreen", not self.window.attributes("-fullscreen")))
+        self.window.bind("<Escape>", lambda event: self.window.attributes("-fullscreen", False))
         # Create a canvas that can fit the above video source size
-        display_width = self.video_width * self.video_scale
-        display_height = self.video_height * self.video_scale
+        display_width = int(self.video_width * self.video_scale)
+        display_height = int(self.video_height * self.video_scale)
         self.video_viewer = tk.Canvas(self.window, width=display_width, height=display_height)
-        self.video_viewer.pack(anchor=tk.NW)
+        self.video_viewer.pack(anchor=tk.NW, fill=tk.BOTH, expand=True)
+        # adjust number of labels displayed on slider with somewhat dynamic amount based on video display scaling
+        slider_interval = self.frame_count // int(10 * self.video_scale)
+        slider_elements = self.frame_count // slider_interval
+        slider_interval = self.frame_count // (slider_elements if slider_elements % 2 else slider_elements + 1)
         self.video_slider = tk.Scale(self.window, from_=0, to=self.frame_count - 1, length=display_width,
-                                     tickinterval=self.frame_count // 10, orient=tk.HORIZONTAL,
+                                     tickinterval=slider_interval, orient=tk.HORIZONTAL,
                                      repeatinterval=1, repeatdelay=1, command=self.seek_frame)
         self.video_slider.bind("<Button-1>", self.trigger_seek)
-        self.video_slider.pack(side=tk.LEFT)
+        self.video_slider.pack(side=tk.TOP, anchor=tk.NW)
 
-        self.video_annot_label = tk.Label(self.window, text="Video Annotation Metadata", font=self.font_header)
-        self.video_annot_label.pack(side=tk.LEFT)
-        self.video_annot_textbox = tk.Text(self.window, height=20, width=50)
+        self.play_state = True
+        self.play_text = tk.StringVar()
+        self.play_text.set("PAUSE")
+        self.play_button = tk.Button(self.window, width=20, padx=5, pady=5,
+                                     textvariable=self.play_text, command=self.toggle_playing)
+        self.play_button.pack(side=tk.LEFT, anchor=tk.NW)
+
+        self.snapshot_button = tk.Button(self.window, text="Snapshot", width=20,  padx=5, pady=5, command=self.snapshot)
+        self.snapshot_button.pack(side=tk.LEFT, anchor=tk.NW)
+
+        self.video_annot_label = tk.Label(self.window, text="Video Description Metadata", font=self.font_header)
+        self.video_annot_label.pack(side=tk.TOP)
+        self.video_annot_textbox = tk.Text(self.window, height=10, width=display_width)
         self.video_annot_scroll = tk.Scrollbar(self.window, command=self.video_annot_textbox.yview)
         self.video_annot_textbox.configure(yscrollcommand=self.video_annot_scroll.set)
         self.video_annot_textbox.tag_configure("big", font=self.font_header)
         self.video_annot_textbox.tag_configure("code", font=self.font_code)
         self.video_annot_textbox.tag_configure("normal", foreground='#476042', font=self.font_normal)
-        self.video_annot_textbox.insert(tk.END, "<nodata>", "code")
-        self.video_annot_textbox.pack(side=tk.LEFT)
+        self.video_annot_textbox.insert(tk.END, "<nodata video-description>", "code")
+        self.video_annot_textbox.pack(side=tk.BOTTOM, anchor=tk.SW)
         self.video_annot_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.video_infer_label = tk.Label(self.window, text="Video Inference Metadata", font=self.font_header)
@@ -218,8 +236,8 @@ class VideoResultPlayerApp(object):
         self.video_infer_textbox.tag_configure("big", font=self.font_header)
         self.video_infer_textbox.tag_configure("code", font=self.font_code)
         self.video_infer_textbox.tag_configure("normal", foreground='#476042', font=self.font_normal)
-        self.video_infer_textbox.insert(tk.END, "<nodata>", "code")
-        self.video_infer_textbox.pack(side=tk.BOTTOM)
+        self.video_infer_textbox.insert(tk.END, "<nodata video-infer>", "code")
+        self.video_infer_textbox.pack(side=tk.BOTTOM, anchor=tk.NE)
         self.video_infer_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.text_infer_label = tk.Label(self.window, text="Text Inference Metadata", font=self.font_header)
@@ -230,18 +248,9 @@ class VideoResultPlayerApp(object):
         self.text_infer_textbox.tag_configure("big", font=self.font_header)
         self.text_infer_textbox.tag_configure("code", font=self.font_code)
         self.text_infer_textbox.tag_configure("normal", foreground="#476042", font=self.font_normal)
-        self.text_infer_textbox.insert(tk.END, "<nodata>", "code")
+        self.text_infer_textbox.insert(tk.END, "<nodata text-infer>", "code")
         self.text_infer_textbox.pack(side=tk.LEFT)
         self.text_infer_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.snapshot_button = tk.Button(self.window, text="Snapshot", width=50, command=self.snapshot)
-        self.snapshot_button.pack(side=tk.LEFT)
-
-        self.play_state = True
-        self.play_text = tk.StringVar()
-        self.play_text.set("PAUSE")
-        self.play_button = tk.Button(self.window, textvariable=self.play_text, width=40, command=self.toggle_playing)
-        self.play_button.pack(side=tk.LEFT)
 
     def trigger_seek(self, event):
         coord_min = self.video_slider.coords(0)
@@ -338,7 +347,8 @@ class VideoResultPlayerApp(object):
         """
         self.next_time = time.perf_counter()
 
-        if not self.play_state:
+        # in case of pause button or normal end of video reached, just loop for next event to resume reading video
+        if not self.play_state or self.frame_index >= self.frame_count:
             self.window.after(30, self.update_video)
             return
 
@@ -348,22 +358,29 @@ class VideoResultPlayerApp(object):
             self.error = True
             return
 
+        next_time = time.perf_counter()
+        call_time_delta = next_time - self.last_time
+        self.last_time = next_time
+        # default if cannot be inferred from previous time
+        wait_time_delta = 1 if call_time_delta > self.frame_delta else max(self.frame_delta - call_time_delta, 1)
+        # if delays become too big, drop frames to catch up, ignore first that is always big because no previous one
+        call_msec_delta = call_time_delta * 1000.
+        if call_msec_delta > self.frame_delta * 2 and self.frame_index > 1:
+            LOGGER.warning("Drop Frame: %8s, Call Delta: %6.2fms", self.frame_index, call_msec_delta)
+            self.window.after(1, self.update_video)
+            return
+
         frame_dims = (self.video_width, self.video_height)
         if self.video_scale != 1:
             frame_dims = (int(self.video_width * self.video_scale), int(self.video_height * self.video_scale))
             frame = cv.resize(frame, frame_dims, interpolation=cv.INTER_NEAREST)
         self.update_metadata()
 
-        # default if cannot be inferred from previous time
-        next_time = time.perf_counter()
-        call_time_delta = next_time - self.last_time
-        self.last_time = next_time
-        wait_time_delta = 1 if call_time_delta > self.frame_delta else max(self.frame_delta - call_time_delta, 0)
         fps = 1. / call_time_delta
-        LOGGER.debug("Frame: %8s, Last: %8.2f, Time: %8.2f, Real Delta: %6.2fms, "
+        LOGGER.debug("Show Frame: %8s, Last: %8.2f, Time: %8.2f, Real Delta: %6.2fms, "
                      "Call Delta: %6.2fms, Target Delta: %6.2fms, Real FPS: %6.2f WxH: %s",
                      self.frame_index, self.last_time, self.frame_time, wait_time_delta,
-                     call_time_delta * 1000., self.frame_delta, fps, frame_dims)
+                     call_msec_delta, self.frame_delta, fps, frame_dims)
 
         # display basic information
         text_position = (10, 25)
@@ -508,9 +525,12 @@ def make_parser():
                                        description="Options that configure video processing.")
     video_opts.add_argument("--scale", "-s", type=float, default=1.0,
                             help="Scale video for bigger/smaller display (warning: impacts FPS).")
-    video_opts.add_argument("--queue", "-q", type=int, default=128,
+    video_opts.add_argument("--queue", "-Q", type=int, default=128,
                             help="Queue size to attempt preloading frames (warning: impacts FPS).")
-    video_opts.add_argument("--debug", "-d", action="store_true", help="Debug logging.")
+    log_opts = ap.add_argument_group(title="Logging Options",
+                                     description="Options that configure output logging.")
+    log_opts.add_argument("--quiet", "-q", action="store_true", help="Do not output anything else than error.")
+    log_opts.add_argument("--debug", "-d", action="store_true", help="Enable extra debug logging.")
     return ap
 
 
@@ -520,8 +540,11 @@ def main():
     ns = ap.parse_args(args=argv)
     if ns.debug:
         LOGGER.setLevel(logging.DEBUG)
+    if ns.quiet:
+        LOGGER.setLevel(logging.ERROR)
     args = vars(ns)
     args.pop("debug", None)
+    args.pop("quiet", None)
     return VideoResultPlayerApp(**args)  # auto-map arguments by name
 
 
