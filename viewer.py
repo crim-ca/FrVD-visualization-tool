@@ -2,13 +2,14 @@
 Minimalistic video player that allows visualization and easier interpretation of FAR-VVD results.
 """
 import argparse
-import datetime
 import json
 import logging
 import math
 import os
+import queue
 import sys
 import time
+import threading
 
 import cv2 as cv
 import PIL.Image
@@ -25,18 +26,65 @@ handler.setFormatter(formatter)
 LOGGER.addHandler(handler)
 
 
-def setup_text_window():
-    LOGGER.info("Setup text window to display results")
-    root = tk.Tk()
-    root.protocol("WM_DELETE_WINDOW", lambda: root.quit())
-    scrollbar = tk.Scrollbar(root)
-    textbox = tk.Text(root, height=4, width=50)
-    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-    textbox.pack(side=tk.LEFT, fill=tk.Y)
-    scrollbar.config(command=textbox.yview)
-    textbox.config(yscrollcommand=scrollbar.set)
-    textbox.insert(tk.END, "<nodata>")
-    return root
+class VideoCaptureThread(object):
+    def __init__(self, source=0, width=None, height=None, queue_size=10):
+        self.source = source
+        self.video = cv.VideoCapture(self.source)
+        if width:
+            self.video.set(cv.CAP_PROP_FRAME_WIDTH, width)
+        if height:
+            self.video.set(cv.CAP_PROP_FRAME_HEIGHT, height)
+        self.started = False
+        self.thread = None
+        self.queue = queue.Queue(maxsize=queue_size)
+        self.read_lock = threading.Lock()
+
+    def get(self, setting):
+        return self.video.get(setting)
+
+    def set(self, setting, value):
+        self.video.set(setting, value)
+
+    def start(self):
+        if self.started:
+            LOGGER.warning("Threaded video capturing has already been started.")
+            return None
+        self.started = True
+        self.thread = threading.Thread(target=self.update, args=())
+        self.thread.start()
+        return self
+
+    def update(self):
+        while self.started:
+            if not self.queue.full():
+                grabbed, frame = self.video.read()
+                if not grabbed:
+                    return
+                with self.read_lock:
+                    index = int(self.get(cv.CAP_PROP_POS_FRAMES))
+                    msec = self.get(cv.CAP_PROP_POS_MSEC)
+                    self.queue.put((grabbed, frame.copy(), index, msec))
+
+    def seek(self, frame_index):
+        self.stop()
+        self.set(cv.CAP_PROP_POS_FRAMES, frame_index)
+        ms = self.get(cv.CAP_PROP_POS_MSEC)
+        with self.read_lock:
+            with self.queue.mutex:
+                self.queue.queue.clear()
+        self.start()
+        return ms
+
+    def read(self):
+        grabbed, frame, index, msec = self.queue.get()
+        return grabbed, frame, index, msec
+
+    def stop(self):
+        self.started = False
+        self.thread.join()
+
+    def __exit__(self, exec_type, exc_value, traceback):
+        self.video.release()
 
 
 class VideoResultPlayerApp(object):
@@ -94,7 +142,7 @@ class VideoResultPlayerApp(object):
         self.video_source = os.path.abspath(video_file)
         if not os.path.isfile(video_file):
             raise ValueError("Cannot find video file: [{}]".format(video_file))
-        LOGGER.info("Using video file: %s", video_file)
+        LOGGER.info("Using video file: [%s]", video_file)
         # use video name as best title minimally available, adjust after if possible with metadata
         self.video_title = os.path.splitext(os.path.split(video_file)[-1])[0]
         self.frame_output = output
@@ -114,13 +162,9 @@ class VideoResultPlayerApp(object):
         self.window.mainloop()  # blocking
         LOGGER.log(logging.INFO if self.error else logging.ERROR, "Exit")
 
-    def __del__(self):
-        if self.video and self.video.isOpened():
-            self.video.release()
-
     def setup_player(self):
         LOGGER.info("Creating player...")
-        self.video = cv.VideoCapture(self.video_source)
+        self.video = VideoCaptureThread(self.video_source).start()
         self.frame_index = 0
         self.frame_time = 0.0
         self.frame_fps = int(self.video.get(cv.CAP_PROP_FPS))
@@ -129,6 +173,12 @@ class VideoResultPlayerApp(object):
         self.video_duration = self.frame_delta * self.frame_count
         self.video_width = int(self.video.get(cv.CAP_PROP_FRAME_WIDTH))
         self.video_height = int(self.video.get(cv.CAP_PROP_FRAME_HEIGHT))
+        expected_width = int(self.video_width * self.video_scale)
+        if expected_width < 480:
+            new_scale = 480. / float(self.video_width)
+            LOGGER.warning("Readjusting video scale [%.3f] to [%.3f] to ensure minimal width [480px].",
+                           self.video_scale, new_scale)
+            self.video_scale = new_scale
 
     def setup_window(self):
         self.window = tk.Tk()
@@ -139,7 +189,9 @@ class VideoResultPlayerApp(object):
         self.video_viewer = tk.Canvas(self.window, width=display_width, height=display_height)
         self.video_viewer.pack(anchor=tk.NW)
         self.video_slider = tk.Scale(self.window, from_=0, to=self.frame_count - 1, length=display_width,
-                                     tickinterval=self.frame_count // 10, orient=tk.HORIZONTAL, command=self.seek_frame)
+                                     tickinterval=self.frame_count // 10, orient=tk.HORIZONTAL,
+                                     repeatinterval=1, repeatdelay=1, command=self.seek_frame)
+        self.video_slider.bind("<Button-1>", self.trigger_seek)
         self.video_slider.pack(side=tk.LEFT)
 
         self.video_annot_label = tk.Label(self.window, text="Video Annotation Metadata", font=self.font_header)
@@ -186,6 +238,22 @@ class VideoResultPlayerApp(object):
         self.play_text.set("PAUSE")
         self.play_button = tk.Button(self.window, textvariable=self.play_text, width=40, command=self.toggle_playing)
         self.play_button.pack(side=tk.LEFT)
+
+    def trigger_seek(self, event):
+        coord_min = self.video_slider.coords(0)
+        coord_max = self.video_slider.coords(self.frame_count)
+        if self.video_slider.identify(event.x, event.y) == "slider":
+            return  # ignore event when clicking directly on the slider
+        if event.x <= coord_min[0]:
+            index = 0
+        elif event.x >= coord_max[0]:
+            index = self.frame_count - 1
+        else:
+            ratio = float(self.frame_count) / float(coord_max[0] - coord_min[0])
+            index = int((event.x - coord_min[0]) * ratio)
+        LOGGER.debug("Seek frame %s from click event (%s, %s) between [%s, %s]",
+                     index, event.x, event.y, coord_min, coord_max)
+        self.seek_frame(index)
 
     def toggle_playing(self):
         if self.play_state:
@@ -270,18 +338,16 @@ class VideoResultPlayerApp(object):
             self.window.after(30, self.update_video)
             return
 
-        ret, frame = self.video.read()
-        if not ret:
+        grabbed, frame, self.frame_index, self.frame_time = self.video.read()
+        if not grabbed:
             LOGGER.error("Playback error occurred when reading next video frame.")
             self.error = True
             return
+
         frame_dims = (self.video_width, self.video_height)
         if self.video_scale != 1:
             frame_dims = (int(self.video_width * self.video_scale), int(self.video_height * self.video_scale))
             frame = cv.resize(frame, frame_dims, interpolation=cv.INTER_NEAREST)
-
-        self.frame_index = int(self.video.get(cv.CAP_PROP_POS_FRAMES))
-        self.frame_time = self.video.get(cv.CAP_PROP_POS_MSEC)
         self.update_metadata()
 
         # default if cannot be inferred from previous time
@@ -290,11 +356,10 @@ class VideoResultPlayerApp(object):
         self.last_time = next_time
         wait_time_delta = 0 if call_time_delta > self.frame_delta else max(self.frame_delta - call_time_delta, 0)
         fps = 1. / call_time_delta
-        LOGGER.debug("Frame: %8s, Last: %8.2f, Time: %8.2f, Real Delta: %6.2fms, "
-                     "Call Delta: %6.2fms, Target Delta: %6.2fms, Real FPS: %6.2f WxH: %sx%s",
-                     self.frame_index, self.last_time, self.frame_time, wait_time_delta,
-                     call_time_delta * 1000., self.frame_delta, fps, frame_dims[0], frame_dims[1])
-        wait_time_delta = 1
+        #LOGGER.debug("Frame: %8s, Last: %8.2f, Time: %8.2f, Real Delta: %6.2fms, "
+        #             "Call Delta: %6.2fms, Target Delta: %6.2fms, Real FPS: %6.2f WxH: %s",
+        #             self.frame_index, self.last_time, self.frame_time, wait_time_delta,
+        #             call_time_delta * 1000., self.frame_delta, fps, frame_dims)
 
         # display basic information
         text_position = (10, 25)
@@ -323,9 +388,10 @@ class VideoResultPlayerApp(object):
         """
         Moves the video to the given frame index and fetches metadata starting at that moment.
         """
-        self.frame_index = int(frame_index)
-        self.video.set(cv.CAP_PROP_POS_FRAMES, self.frame_index)
-        self.frame_time = self.video.get(cv.CAP_PROP_POS_MSEC)
+        frame_index = int(frame_index)
+        self.frame_time = self.video.seek(frame_index)
+        self.frame_index = frame_index
+        self.video_slider.set(frame_index)
         self.update_metadata(seek=True)
 
     def setup_metadata(self, video_annotations, video_results, text_results):
