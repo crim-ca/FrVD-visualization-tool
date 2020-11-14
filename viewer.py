@@ -10,6 +10,7 @@ import queue
 import sys
 import time
 import threading
+from datetime import datetime
 
 import cv2 as cv
 import PIL.Image
@@ -111,25 +112,25 @@ class VideoResultPlayerApp(object):
     last_time = 0
     next_time = 0
     # metadata references
-    video_annot_meta = None
-    video_annot_index = None
+    video_desc_meta = None
+    video_desc_index = None
     video_infer_meta = None
     video_infer_index = None
-    text_infer_meta = None
-    text_infer_index = None
+    text_annot_meta = None
+    text_annot_index = None
     # handles to UI elements
     window = None
     video_viewer = None
     video_slider = None
-    video_annot_label = None
-    video_annot_scroll = None
-    video_annot_textbox = None
+    video_desc_label = None
+    video_desc_scroll = None
+    video_desc_textbox = None
     video_infer_label = None
     video_infer_scroll = None
     video_infer_textbox = None
-    text_infer_label = None
-    text_infer_scroll = None
-    text_infer_textbox = None
+    text_annot_label = None
+    text_annot_scroll = None
+    text_annot_textbox = None
     snapshot_button = None
     play_button = None
     play_state = True
@@ -138,8 +139,10 @@ class VideoResultPlayerApp(object):
     font_header = ("Arial", 16, "bold")
     font_code = ("Courier", 12, "normal")
     font_normal = ("Arial", 12, "normal")
+    NO_DATA = "<no-data>"
 
-    def __init__(self, video_file, video_annotations, video_results, text_results, output=None, scale=1.0, queue=128):
+    def __init__(self, video_file, video_description, video_results, text_annotations,
+                 output=None, scale=1.0, queue_size=128):
         self.video_source = os.path.abspath(video_file)
         if not os.path.isfile(video_file):
             raise ValueError("Cannot find video file: [{}]".format(video_file))
@@ -150,13 +153,13 @@ class VideoResultPlayerApp(object):
         self.video_scale = scale
         if scale <= 0:
             raise ValueError("Invalid scaling must be greater than 0.")
-        if queue > 1:
-            LOGGER.debug("Setting queue size: %s", queue)
-            self.frame_queue = queue
+        if queue_size > 1:
+            LOGGER.debug("Setting queue size: %s", queue_size)
+            self.frame_queue = queue_size
 
         self.setup_player()
         self.setup_window()
-        if not self.setup_metadata(video_annotations, video_results, text_results):
+        if not self.setup_metadata(video_description, video_results, text_annotations):
             return
 
         self.run()
@@ -216,17 +219,29 @@ class VideoResultPlayerApp(object):
         self.snapshot_button = tk.Button(self.window, text="Snapshot", width=20,  padx=5, pady=5, command=self.snapshot)
         self.snapshot_button.pack(side=tk.LEFT, anchor=tk.NW)
 
-        self.video_annot_label = tk.Label(self.window, text="Video Description Metadata", font=self.font_header)
-        self.video_annot_label.pack(side=tk.TOP)
-        self.video_annot_textbox = tk.Text(self.window, height=10, width=display_width)
-        self.video_annot_scroll = tk.Scrollbar(self.window, command=self.video_annot_textbox.yview)
-        self.video_annot_textbox.configure(yscrollcommand=self.video_annot_scroll.set)
-        self.video_annot_textbox.tag_configure("big", font=self.font_header)
-        self.video_annot_textbox.tag_configure("code", font=self.font_code)
-        self.video_annot_textbox.tag_configure("normal", foreground='#476042', font=self.font_normal)
-        self.video_annot_textbox.insert(tk.END, "<nodata video-description>", "code")
-        self.video_annot_textbox.pack(side=tk.BOTTOM, anchor=tk.SW)
-        self.video_annot_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.text_annot_label = tk.Label(self.window, text="Text Annotation Metadata", font=self.font_header)
+        self.text_annot_label.pack(side=tk.TOP, fill=tk.X)
+        self.text_annot_textbox = tk.Text(self.window, height=20, width=50)
+        self.text_annot_scroll = tk.Scrollbar(self.window, command=self.text_annot_textbox.yview)
+        self.text_annot_textbox.configure(yscrollcommand=self.text_annot_scroll.set)
+        self.text_annot_textbox.tag_configure("big", font=self.font_header)
+        self.text_annot_textbox.tag_configure("code", font=self.font_code)
+        self.text_annot_textbox.tag_configure("normal", foreground="#476042", font=self.font_normal)
+        self.text_annot_textbox.insert(tk.END, self.NO_DATA, "code")
+        self.text_annot_textbox.pack(side=tk.RIGHT)
+        self.text_annot_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.video_desc_label = tk.Label(self.window, text="Video Description Metadata", font=self.font_header)
+        self.video_desc_label.pack(side=tk.TOP)
+        self.video_desc_textbox = tk.Text(self.window, height=10, width=display_width)
+        self.video_desc_scroll = tk.Scrollbar(self.window, command=self.video_desc_textbox.yview)
+        self.video_desc_textbox.configure(yscrollcommand=self.video_desc_scroll.set)
+        self.video_desc_textbox.tag_configure("big", font=self.font_header)
+        self.video_desc_textbox.tag_configure("code", font=self.font_code)
+        self.video_desc_textbox.tag_configure("normal", foreground='#476042', font=self.font_normal)
+        self.video_desc_textbox.insert(tk.END, self.NO_DATA, "code")
+        self.video_desc_textbox.pack(side=tk.BOTTOM, anchor=tk.SW)
+        self.video_desc_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.video_infer_label = tk.Label(self.window, text="Video Inference Metadata", font=self.font_header)
         self.video_infer_label.pack(side=tk.LEFT)
@@ -236,21 +251,9 @@ class VideoResultPlayerApp(object):
         self.video_infer_textbox.tag_configure("big", font=self.font_header)
         self.video_infer_textbox.tag_configure("code", font=self.font_code)
         self.video_infer_textbox.tag_configure("normal", foreground='#476042', font=self.font_normal)
-        self.video_infer_textbox.insert(tk.END, "<nodata video-infer>", "code")
-        self.video_infer_textbox.pack(side=tk.BOTTOM, anchor=tk.NE)
+        self.video_infer_textbox.insert(tk.END, self.NO_DATA, "code")
+        self.video_infer_textbox.pack(side=tk.BOTTOM, anchor=tk.SE)
         self.video_infer_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.text_infer_label = tk.Label(self.window, text="Text Inference Metadata", font=self.font_header)
-        self.text_infer_label.pack(side=tk.BOTTOM)
-        self.text_infer_textbox = tk.Text(self.window, height=20, width=50)
-        self.text_infer_scroll = tk.Scrollbar(self.window, command=self.text_infer_textbox.yview)
-        self.text_infer_textbox.configure(yscrollcommand=self.text_infer_scroll.set)
-        self.text_infer_textbox.tag_configure("big", font=self.font_header)
-        self.text_infer_textbox.tag_configure("code", font=self.font_code)
-        self.text_infer_textbox.tag_configure("normal", foreground="#476042", font=self.font_normal)
-        self.text_infer_textbox.insert(tk.END, "<nodata text-infer>", "code")
-        self.text_infer_textbox.pack(side=tk.LEFT)
-        self.text_infer_scroll.pack(side=tk.RIGHT, fill=tk.Y)
 
     def trigger_seek(self, event):
         coord_min = self.video_slider.coords(0)
@@ -277,31 +280,37 @@ class VideoResultPlayerApp(object):
             LOGGER.debug("Video resume.")
         self.play_state = not self.play_state
 
-    def update_annotation(self, metadata):
+    def update_video_desc(self, metadata):
         if metadata is None:
-            text = "<no-data>"
+            text = self.NO_DATA
         else:
             text = metadata["vd"]
-        self.video_annot_textbox.delete("1.0", tk.END)
-        self.video_annot_textbox.insert(tk.END, text, "normal")
+        self.video_desc_textbox.delete("1.0", tk.END)
+        self.video_desc_textbox.insert(tk.END, text, "normal")
 
-    def update_infer_video(self, metadata):
+    def update_video_infer(self, metadata):
         if metadata is None:
-            text = "<no-data>"
+            text = self.NO_DATA
         else:
             header = "[Score] [Classes]\n\n  "
-            values = "\n  ".join(["[{:.2f}] {})".format(s, c) for c, s in zip(metadata["classes"], metadata["scores"])])
+            values = "\n  ".join(["[{:.2f}] {}".format(s, c) for c, s in zip(metadata["classes"], metadata["scores"])])
             text = header + values
         self.video_infer_textbox.delete("1.0", tk.END)
         self.video_infer_textbox.insert(tk.END, text, "normal")
 
-    def update_infer_text(self, metadata):
+    def update_text_annot(self, metadata):
         if metadata is None:
-            text = "<no-data>"
+            text = self.NO_DATA
         else:
-            text = json.dumps(metadata, indent=2, ensure_ascii=False)
-        self.text_infer_textbox.delete("1.0", tk.END)
-        self.text_infer_textbox.insert(tk.END, text, "normal")
+            annotations = metadata["annotations"]
+            fmt = "  {:<16s} | {:<16s} | {:<16s}"
+            fields = "POS", "type", "lemme"
+            text = fmt.format(*fields)
+            for i, annot in enumerate(annotations):
+                text += "[{}]:\n".format(i)
+                text += "\n".join([fmt.format(*[item[f] for f in fields]) for item in annot])
+        self.text_annot_textbox.delete("1.0", tk.END)
+        self.text_annot_textbox.insert(tk.END, text, "normal")
 
     def update_metadata(self, seek=False):
         def update_meta(meta_container, meta_index, meta_updater):
@@ -337,9 +346,9 @@ class VideoResultPlayerApp(object):
                 return updated_index
             return None
 
-        self.video_annot_index = update_meta(self.video_annot_meta, self.video_annot_index, self.update_annotation)
-        self.video_infer_index = update_meta(self.video_infer_meta, self.video_infer_index, self.update_infer_video)
-        self.text_infer_index = update_meta(self.text_infer_meta, self.text_infer_index, self.update_infer_text)
+        self.video_desc_index = update_meta(self.video_desc_meta, self.video_desc_index, self.update_video_desc)
+        self.video_infer_index = update_meta(self.video_infer_meta, self.video_infer_index, self.update_video_infer)
+        self.text_annot_index = update_meta(self.text_annot_meta, self.text_annot_index, self.update_text_annot)
 
     def update_video(self):
         """
@@ -415,23 +424,23 @@ class VideoResultPlayerApp(object):
         self.video_slider.set(frame_index)
         self.update_metadata(seek=True)
 
-    def setup_metadata(self, video_annotations, video_results, text_results):
+    def setup_metadata(self, video_description, video_results, text_annotations):
         """
         Parse available metadata files and prepare the first entry according to provided file references.
         """
         try:
-            if video_annotations and os.path.isfile(video_annotations):
-                LOGGER.info("Parsing video description metadata [%s]...", video_annotations)
-                self.video_annot_meta = self.parse_video_annotation_metadata(video_annotations)
-                self.video_annot_index = 0
+            if video_description and os.path.isfile(video_description):
+                LOGGER.info("Parsing video description metadata [%s]...", video_description)
+                self.video_desc_meta = self.parse_video_annotation_metadata(video_description)
+                self.video_desc_index = 0
             if video_results and os.path.isfile(video_results):
                 LOGGER.info("Parsing video inference metadata [%s]...", video_results)
                 self.video_infer_meta = self.parse_video_inference_metadata(video_results)
                 self.video_infer_index = 0
-            if text_results and os.path.isfile(text_results):
-                LOGGER.info("Parsing text inference metadata [%s]...", text_results)
-                self.text_infer_meta = self.parse_text_inference_metadata(text_results)
-                self.text_infer_index = 0
+            if text_annotations and os.path.isfile(text_annotations):
+                LOGGER.info("Parsing text inference metadata [%s]...", text_annotations)
+                self.text_annot_meta = self.parse_text_annotations_metadata(text_annotations)
+                self.text_annot_index = 0
         except Exception as exc:
             self.error = True
             LOGGER.error("Invalid formats. One or more metadata file could not be parsed.", exc_info=exc)
@@ -482,10 +491,18 @@ class VideoResultPlayerApp(object):
         return None
 
     @staticmethod
-    def parse_text_inference_metadata(metadata_path):
+    def parse_text_annotations_metadata(metadata_path):
         try:
-            pass
-            # TODO: convert TS: [start,end] -> start_ms, end_ms
+            with open(metadata_path) as meta_file:
+                metadata = json.load(meta_file)
+            annotations = metadata["data"]
+            for annot in annotations:
+                # convert TS: [start,end] -> start_ms, end_ms
+                ts = datetime.strptime(annot["TS"][0], "T%H:%M:%S.%f")
+                te = datetime.strptime(annot["TS"][1], "T%H:%M:%S.%f")
+                annot["start_ms"] = (ts.hour * 3600 + ts.minute * 60 + ts.second) * 1000 + ts.microsecond
+                annot["end_ms"] = (te.hour * 3600 + te.minute * 60 + te.second) * 1000 + te.microsecond
+            return list(sorted(annotations, key=lambda a: a["start_ms"]))
         except Exception as exc:
             LOGGER.error("Could not parse text inference metadata file: [%s]", metadata_path, exc_info=exc)
         return None
@@ -511,12 +528,12 @@ def make_parser():
     main_args = ap.add_argument_group(title="Main Arguments",
                                       description="Main arguments")
     main_args.add_argument("video_file", help="Video file to view.")
-    main_args.add_argument("--video-description", "--vd", dest="video_annotations",
+    main_args.add_argument("--video-description", "--vd", dest="video_description",
                            help="JSON metadata file with original video-description annotations.")
     main_args.add_argument("--video-inference", "--vi", dest="video_results",
-                           help="JSON metadata file with video actions inference results.")
-    main_args.add_argument("--text-inference", "--ti", dest="text_results",
-                           help="JSON metadata file with text subjects and verbs results.")
+                           help="JSON metadata file with video action recognition inference results.")
+    main_args.add_argument("--text-annotation", "--ta", dest="text_annotations",
+                           help="JSON metadata file with text subjects and verbs annotations.")
     util_opts = ap.add_argument_group(title="Utility Options",
                                       description="Options that configure extra functionalities.")
     util_opts.add_argument("--output", "-o", default="/tmp/video-result-viewer",
@@ -525,7 +542,7 @@ def make_parser():
                                        description="Options that configure video processing.")
     video_opts.add_argument("--scale", "-s", type=float, default=1.0,
                             help="Scale video for bigger/smaller display (warning: impacts FPS).")
-    video_opts.add_argument("--queue", "-Q", type=int, default=128,
+    video_opts.add_argument("--queue", "-Q", type=int, default=128, dest="queue_size",
                             help="Queue size to attempt preloading frames (warning: impacts FPS).")
     log_opts = ap.add_argument_group(title="Logging Options",
                                      description="Options that configure output logging.")
