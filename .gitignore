@@ -15,3 +15,6 @@ __pycache__/
 *.png
 *.tif[f]
 
+## Doc
+# re-include other images that are excluded
+!doc/*.png
