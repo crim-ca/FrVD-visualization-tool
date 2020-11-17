@@ -1,0 +1,17 @@
+## IDE
+.idea/
+.vscode/
+
+## Artifacts
+__pycache__/
+
+## Data
+*.avi
+*.csv
+*.jp[e]g
+*.json
+*.log
+*.mp4
+*.png
+*.tif[f]
+
