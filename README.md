@@ -2,6 +2,8 @@
 
 Minimalistic video player that allows visualization and easier interpretation of FAR-VVD results. 
 
+![demo](./doc/demo-preview.png)
+
 ## Description
 
 The script takes as input the following information and displays them for corresponding timestamps.
