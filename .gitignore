@@ -2,6 +2,9 @@
 .idea/
 .vscode/
 
+## Artifacts
+__pycache__/
+
 ## Data
 *.avi
 *.csv

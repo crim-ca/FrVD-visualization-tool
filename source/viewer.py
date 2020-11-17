@@ -6,10 +6,8 @@ import json
 import logging
 import math
 import os
-import queue
 import sys
 import time
-import threading
 from datetime import datetime
 
 import cv2 as cv
@@ -17,75 +15,16 @@ import PIL.Image
 import PIL.ImageTk
 import tkinter as tk
 
+from stream import VideoCaptureThread
+
 __NAME__ = os.path.splitext(os.path.split(__file__)[-1])[0]
 LOGGER = logging.getLogger(__NAME__)
 LOGGER.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-formatter = logging.Formatter(fmt="[%(asctime)s] %(levelname)-10.10s [%(threadName)s][%(name)s] %(message)s",
-                              datefmt="%Y-%m-%d %H:%M:%S")
-handler.setFormatter(formatter)
-LOGGER.addHandler(handler)
-
-
-class VideoCaptureThread(object):
-    def __init__(self, source=0, width=None, height=None, queue_size=10):
-        self.source = source
-        self.video = cv.VideoCapture(self.source)
-        if width:
-            self.video.set(cv.CAP_PROP_FRAME_WIDTH, width)
-        if height:
-            self.video.set(cv.CAP_PROP_FRAME_HEIGHT, height)
-        self.started = False
-        self.thread = None
-        self.queue = queue.Queue(maxsize=queue_size)
-        self.read_lock = threading.Lock()
-
-    def get(self, setting):
-        return self.video.get(setting)
-
-    def set(self, setting, value):
-        self.video.set(setting, value)
-
-    def start(self):
-        if self.started:
-            LOGGER.warning("Threaded video capturing has already been started.")
-            return None
-        self.started = True
-        self.thread = threading.Thread(target=self.update, args=())
-        self.thread.start()
-        return self
-
-    def update(self):
-        while self.started:
-            if not self.queue.full():
-                grabbed, frame = self.video.read()
-                if not grabbed:
-                    return
-                with self.read_lock:
-                    index = int(self.get(cv.CAP_PROP_POS_FRAMES))
-                    msec = self.get(cv.CAP_PROP_POS_MSEC)
-                    self.queue.put((grabbed, frame.copy(), index, msec))
-
-    def seek(self, frame_index):
-        self.stop()
-        self.set(cv.CAP_PROP_POS_FRAMES, frame_index)
-        ms = self.get(cv.CAP_PROP_POS_MSEC)
-        with self.read_lock:
-            with self.queue.mutex:
-                self.queue.queue.clear()
-        self.start()
-        return ms
-
-    def read(self):
-        grabbed, frame, index, msec = self.queue.get()
-        return grabbed, frame, index, msec
-
-    def stop(self):
-        self.started = False
-        self.thread.join()
-
-    def __exit__(self, exec_type, exc_value, traceback):
-        self.video.release()
+_handler = logging.StreamHandler()
+_formatter = logging.Formatter(fmt="[%(asctime)s] %(levelname)-10.10s [%(threadName)s][%(name)s] %(message)s",
+                               datefmt="%Y-%m-%d %H:%M:%S")
+_handler.setFormatter(_formatter)
+LOGGER.addHandler(_handler)
 
 
 class VideoResultPlayerApp(object):
@@ -104,13 +43,16 @@ class VideoResultPlayerApp(object):
     frame = None
     frame_fps = 0
     frame_time = 0
-    frame_queue = 128
+    frame_queue = 10
     frame_delta = None
     frame_index = None
     frame_count = None
     frame_output = None
+    frame_drop_factor = 4
     last_time = 0
     next_time = 0
+    call_cumul_count = 0
+    call_cumul_value = 0
     # metadata references
     video_desc_meta = None
     video_desc_index = None
@@ -136,13 +78,15 @@ class VideoResultPlayerApp(object):
     play_state = True
     play_label = None
     play_text = None
-    font_header = ("Arial", 16, "bold")
+    font_header = ("Helvetica", 16, "bold")
     font_code = ("Courier", 12, "normal")
-    font_normal = ("Arial", 12, "normal")
+    font_normal = ("Times", 12, "normal")
+    font_code_tag = "code"
+    font_normal_tag = "normal"
     NO_DATA = "<no-data>"
 
     def __init__(self, video_file, video_description, video_results, text_annotations,
-                 output=None, scale=1.0, queue_size=128):
+                 output=None, scale=1.0, queue_size=10, frame_drop_factor=4):
         self.video_source = os.path.abspath(video_file)
         if not os.path.isfile(video_file):
             raise ValueError("Cannot find video file: [{}]".format(video_file))
@@ -156,6 +100,9 @@ class VideoResultPlayerApp(object):
         if queue_size > 1:
             LOGGER.debug("Setting queue size: %s", queue_size)
             self.frame_queue = queue_size
+        if frame_drop_factor > 1:
+            LOGGER.debug("Setting frame drop factor: %s", frame_drop_factor)
+            self.frame_drop_factor = frame_drop_factor
 
         self.setup_player()
         self.setup_window()
@@ -224,42 +171,45 @@ class VideoResultPlayerApp(object):
         self.text_annot_textbox = tk.Text(self.window, height=20, width=50)
         self.text_annot_scroll = tk.Scrollbar(self.window, command=self.text_annot_textbox.yview)
         self.text_annot_textbox.configure(yscrollcommand=self.text_annot_scroll.set)
-        self.text_annot_textbox.tag_configure("big", font=self.font_header)
-        self.text_annot_textbox.tag_configure("code", font=self.font_code)
-        self.text_annot_textbox.tag_configure("normal", foreground="#476042", font=self.font_normal)
-        self.text_annot_textbox.insert(tk.END, self.NO_DATA, "code")
+        self.text_annot_textbox.tag_configure(self.font_code_tag, font=self.font_code)
+        self.text_annot_textbox.tag_configure(self.font_normal_tag, font=self.font_normal)
         self.text_annot_textbox.pack(side=tk.RIGHT)
         self.text_annot_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.update_text_annot(None)
 
         self.video_desc_label = tk.Label(self.window, text="Video Description Metadata", font=self.font_header)
         self.video_desc_label.pack(side=tk.TOP)
         self.video_desc_textbox = tk.Text(self.window, height=10, width=display_width)
         self.video_desc_scroll = tk.Scrollbar(self.window, command=self.video_desc_textbox.yview)
         self.video_desc_textbox.configure(yscrollcommand=self.video_desc_scroll.set)
-        self.video_desc_textbox.tag_configure("big", font=self.font_header)
-        self.video_desc_textbox.tag_configure("code", font=self.font_code)
-        self.video_desc_textbox.tag_configure("normal", foreground='#476042', font=self.font_normal)
-        self.video_desc_textbox.insert(tk.END, self.NO_DATA, "code")
+        self.video_desc_textbox.tag_configure(self.font_code_tag, font=self.font_code)
+        self.video_desc_textbox.tag_configure(self.font_normal_tag, font=self.font_normal)
         self.video_desc_textbox.pack(side=tk.BOTTOM, anchor=tk.SW)
         self.video_desc_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.update_video_desc(None)
 
         self.video_infer_label = tk.Label(self.window, text="Video Inference Metadata", font=self.font_header)
         self.video_infer_label.pack(side=tk.LEFT)
         self.video_infer_textbox = tk.Text(self.window, height=20, width=50)
         self.video_infer_scroll = tk.Scrollbar(self.window, command=self.video_infer_textbox.yview)
         self.video_infer_textbox.configure(yscrollcommand=self.video_infer_scroll.set)
-        self.video_infer_textbox.tag_configure("big", font=self.font_header)
-        self.video_infer_textbox.tag_configure("code", font=self.font_code)
-        self.video_infer_textbox.tag_configure("normal", foreground='#476042', font=self.font_normal)
-        self.video_infer_textbox.insert(tk.END, self.NO_DATA, "code")
+        self.video_infer_textbox.tag_configure(self.font_code_tag, font=self.font_code)
+        self.video_infer_textbox.tag_configure(self.font_normal_tag, font=self.font_normal)
         self.video_infer_textbox.pack(side=tk.BOTTOM, anchor=tk.SE)
         self.video_infer_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.update_video_infer(None)
 
     def trigger_seek(self, event):
         coord_min = self.video_slider.coords(0)
         coord_max = self.video_slider.coords(self.frame_count)
         if self.video_slider.identify(event.x, event.y) == "slider":
             return  # ignore event when clicking directly on the slider
+
+        # wait for seek to complete to resume frame display
+        # (avoids random flickers of the displayed metadata)
+        self.play_state = False
+
+        # find and apply seek location from mouse click
         if event.x <= coord_min[0]:
             index = 0
         elif event.x >= coord_max[0]:
@@ -267,9 +217,11 @@ class VideoResultPlayerApp(object):
         else:
             ratio = float(self.frame_count) / float(coord_max[0] - coord_min[0])
             index = int((event.x - coord_min[0]) * ratio)
-        LOGGER.debug("Seek frame %s from click event (%s, %s) between [%s, %s]",
+        LOGGER.debug("Seek frame %8s from click event (%s, %s) between [%s, %s]",
                      index, event.x, event.y, coord_min, coord_max)
         self.seek_frame(index)
+        self.update_metadata(seek=True)  # enforce fresh update since everything changed drastically
+        self.play_state = True   # resume
 
     def toggle_playing(self):
         if self.play_state:
@@ -281,26 +233,35 @@ class VideoResultPlayerApp(object):
         self.play_state = not self.play_state
 
     def update_video_desc(self, metadata):
+        self.video_desc_textbox.delete("1.0", tk.END)
         if metadata is None:
             text = self.NO_DATA
+            self.video_desc_textbox.insert(tk.END, "", self.font_normal_tag)
+            self.video_desc_textbox.insert(tk.END, text, self.font_code_tag)
         else:
             text = metadata["vd"]
-        self.video_desc_textbox.delete("1.0", tk.END)
-        self.video_desc_textbox.insert(tk.END, text, "normal")
+            self.video_desc_textbox.insert(tk.END, text, self.font_normal_tag)
+            self.video_desc_textbox.insert(tk.END, "", self.font_code_tag)
 
     def update_video_infer(self, metadata):
+        self.video_infer_textbox.delete("1.0", tk.END)
         if metadata is None:
             text = self.NO_DATA
+            self.video_infer_textbox.insert(tk.END, "", self.font_normal_tag)
+            self.video_infer_textbox.insert(tk.END, text, self.font_code_tag)
         else:
-            header = "[Score] [Classes]\n\n  "
-            values = "\n  ".join(["[{:.2f}] {}".format(s, c) for c, s in zip(metadata["classes"], metadata["scores"])])
+            header = "[Score] [Classes] (index = {})\n\n".format(self.video_infer_index)
+            values = "\n".join(["[{:.2f}] {}".format(s, c) for c, s in zip(metadata["classes"], metadata["scores"])])
             text = header + values
-        self.video_infer_textbox.delete("1.0", tk.END)
-        self.video_infer_textbox.insert(tk.END, text, "normal")
+            self.video_infer_textbox.insert(tk.END, "", self.font_normal_tag)
+            self.video_infer_textbox.insert(tk.END, text, self.font_code_tag)
 
     def update_text_annot(self, metadata):
+        self.text_annot_textbox.delete("1.0", tk.END)
         if metadata is None:
             text = self.NO_DATA
+            self.text_annot_textbox.insert(tk.END, "", self.font_normal_tag)
+            self.text_annot_textbox.insert(tk.END, text, self.font_code_tag)
         else:
             annotations = metadata["annotations"]
             fmt = "  {:<16s} | {:<16s} | {:<16s}"
@@ -309,8 +270,8 @@ class VideoResultPlayerApp(object):
             for i, annot in enumerate(annotations):
                 text += "[{}]:\n".format(i)
                 text += "\n".join([fmt.format(*[item[f] for f in fields]) for item in annot])
-        self.text_annot_textbox.delete("1.0", tk.END)
-        self.text_annot_textbox.insert(tk.END, text, "normal")
+            self.text_annot_textbox.insert(tk.END, "", self.font_normal_tag)
+            self.text_annot_textbox.insert(tk.END, text, self.font_code_tag)
 
     def update_metadata(self, seek=False):
         def update_meta(meta_container, meta_index, meta_updater):
@@ -332,17 +293,17 @@ class VideoResultPlayerApp(object):
                 if seek:
                     # search the earliest index that provides metadata within the new time
                     for index in range(index_total):
-                        if self.frame_time >= current_meta["start_ms"]:
+                        meta = meta_container[index]
+                        if meta["start_ms"] >= self.frame_time:
                             updated_index = index
                             break
                 elif self.frame_time > current_meta["end_ms"]:
                     # otherwise bump to next one if timestamp of the current is passed
                     updated_index = current_index + 1
 
-                if meta_index < index_total - 1:
+                # apply change of metadata
+                if meta_index < index_total - 1 and current_index != updated_index or updated_index == 0:
                     meta_updater(meta_container[updated_index])
-                else:
-                    meta_updater(None)
                 return updated_index
             return None
 
@@ -367,17 +328,27 @@ class VideoResultPlayerApp(object):
             self.error = True
             return
 
-        next_time = time.perf_counter()
-        call_time_delta = next_time - self.last_time
-        self.last_time = next_time
+        self.next_time = time.perf_counter()
+        call_time_delta = self.next_time - self.last_time
+        self.last_time = self.next_time
         # default if cannot be inferred from previous time
         wait_time_delta = 1 if call_time_delta > self.frame_delta else max(self.frame_delta - call_time_delta, 1)
         # if delays become too big, drop frames to catch up, ignore first that is always big because no previous one
         call_msec_delta = call_time_delta * 1000.
-        if call_msec_delta > self.frame_delta * 2 and self.frame_index > 1:
-            LOGGER.warning("Drop Frame: %8s, Call Delta: %6.2fms", self.frame_index, call_msec_delta)
+        call_fps = 1. / call_time_delta
+
+        if call_msec_delta > self.frame_delta * self.frame_drop_factor and self.frame_index > 1:
+            LOGGER.warning("Drop Frame: %8s, Last: %8.2f, Time: %8.2f, Real Delta: %6.2fms, "
+                           "Target Delta: %6.2fms, Call Delta: %6.2fms, Real FPS: %6.2f",
+                           self.frame_index, self.last_time, self.frame_time, wait_time_delta,
+                           self.frame_delta, call_msec_delta, call_fps)
             self.window.after(1, self.update_video)
             return
+        wait_time_delta = 1  # WARNING: just go as fast as possible... tkinter image convert is the limiting factor
+
+        self.call_cumul_value += call_time_delta
+        self.call_cumul_count += 1
+        call_avg_fps = (self.call_cumul_value / self.call_cumul_count)
 
         frame_dims = (self.video_width, self.video_height)
         if self.video_scale != 1:
@@ -385,11 +356,10 @@ class VideoResultPlayerApp(object):
             frame = cv.resize(frame, frame_dims, interpolation=cv.INTER_NEAREST)
         self.update_metadata()
 
-        fps = 1. / call_time_delta
         LOGGER.debug("Show Frame: %8s, Last: %8.2f, Time: %8.2f, Real Delta: %6.2fms, "
-                     "Call Delta: %6.2fms, Target Delta: %6.2fms, Real FPS: %6.2f WxH: %s",
+                     "Target Delta: %6.2fms, Call Delta: %6.2fms, Real FPS: %6.2f (%.2f) WxH: %s",
                      self.frame_index, self.last_time, self.frame_time, wait_time_delta,
-                     call_msec_delta, self.frame_delta, fps, frame_dims)
+                     self.frame_delta, call_msec_delta, call_fps, call_avg_fps, frame_dims)
 
         # display basic information
         text_position = (10, 25)
@@ -397,7 +367,8 @@ class VideoResultPlayerApp(object):
         font_scale = 0.5
         font_color = (209, 80, 0, 255)
         font_stroke = 1
-        text = "Title: {}, Target FPS: {}, Real FPS: {:0.2f}".format(self.video_title, self.frame_fps, fps)
+        text = "Title: {}, Target FPS: {}, Real FPS: {:0.2f} ({:0.2f})" \
+               .format(self.video_title, self.frame_fps, call_fps, call_avg_fps)
         cv.putText(frame, text, text_position, cv.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_stroke)
         text_position = (text_position[0], text_position[1] + int(text_delta * font_scale))
         cur_sec = self.frame_time / 1000.
@@ -413,16 +384,25 @@ class VideoResultPlayerApp(object):
         self.video_viewer.create_image(0, 0, image=self.frame, anchor=tk.NW)
         self.video_slider.set(self.frame_index)
         self.window.after(math.floor(wait_time_delta), self.update_video)
+        self.video_viewer.update_idletasks()
 
     def seek_frame(self, frame_index):
         """
-        Moves the video to the given frame index and fetches metadata starting at that moment.
+        Moves the video to the given frame index (if not the next one).
+        Finally, updates the visual feedback of video progress with the slider.
         """
         frame_index = int(frame_index)
-        self.frame_time = self.video.seek(frame_index)
+
+        # only execute an actual video frame seek() when it doesn't correspond to the next index, since it is already
+        # fetched by the main loop using read()
+        # without this, we would otherwise flush the frame queue and reset everything on each frame
+        if frame_index not in [self.frame_index, self.frame_index - 1]:
+            LOGGER.debug("Seek frame: %8s (fetching)", frame_index)
+            self.frame_time = self.video.seek(frame_index)
+
+        # update slider position
         self.frame_index = frame_index
         self.video_slider.set(frame_index)
-        self.update_metadata(seek=True)
 
     def setup_metadata(self, video_description, video_results, text_annotations):
         """
@@ -524,7 +504,8 @@ class VideoResultPlayerApp(object):
 
 
 def make_parser():
-    ap = argparse.ArgumentParser(prog=__NAME__, description=__doc__, add_help=True)
+    formatter = lambda prog: argparse.HelpFormatter(prog, width=120)  # noqa
+    ap = argparse.ArgumentParser(prog=__NAME__, description=__doc__, add_help=True, formatter_class=formatter)  # noqa
     main_args = ap.add_argument_group(title="Main Arguments",
                                       description="Main arguments")
     main_args.add_argument("video_file", help="Video file to view.")
@@ -537,13 +518,18 @@ def make_parser():
     util_opts = ap.add_argument_group(title="Utility Options",
                                       description="Options that configure extra functionalities.")
     util_opts.add_argument("--output", "-o", default="/tmp/video-result-viewer",
-                           help="Output location of frame snapshots.")
+                           help="Output location of frame snapshots (default: '%(default)s)'.")
     video_opts = ap.add_argument_group(title="Video Options",
                                        description="Options that configure video processing.")
-    video_opts.add_argument("--scale", "-s", type=float, default=1.0,
-                            help="Scale video for bigger/smaller display (warning: impacts FPS).")
-    video_opts.add_argument("--queue", "-Q", type=int, default=128, dest="queue_size",
-                            help="Queue size to attempt preloading frames (warning: impacts FPS).")
+    video_opts.add_argument("--scale", "-s", type=float, default=VideoResultPlayerApp.video_scale,
+                            help="Scale video for bigger/smaller display "
+                                 "(warning: impacts FPS) (default: %(default)s).")
+    video_opts.add_argument("--queue", "-Q", type=int, default=VideoResultPlayerApp.frame_queue, dest="queue_size",
+                            help="Queue size to attempt preloading frames "
+                                 "(warning: impacts FPS) (default: %(default)s).")
+    video_opts.add_argument("--frame-drop-factor", "--fdf", type=int, default=VideoResultPlayerApp.frame_drop_factor,
+                            help="Factor by which the delayed video frames should be dropped if exceeding target FPS. "
+                                 "Avoids long sporadic lags (default: %(default)s).")
     log_opts = ap.add_argument_group(title="Logging Options",
                                      description="Options that configure output logging.")
     log_opts.add_argument("--quiet", "-q", action="store_true", help="Do not output anything else than error.")
