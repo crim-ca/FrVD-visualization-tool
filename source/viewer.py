@@ -575,7 +575,7 @@ def make_parser():
     util_opts = ap.add_argument_group(title="Utility Options",
                                       description="Options that configure extra functionalities.")
     util_opts.add_argument("--output", "-o", default="/tmp/video-result-viewer",
-                           help="Output location of frame snapshots (default: '%(default)s)'.")
+                           help="Output location of frame snapshots (default: [%(default)s]).")
     video_opts = ap.add_argument_group(title="Video Options",
                                        description="Options that configure video processing.")
     video_opts.add_argument("--scale", "-s", type=float, default=VideoResultPlayerApp.video_scale,
@@ -590,7 +590,7 @@ def make_parser():
     video_opts.add_argument("--frame-skip-factor", "--skip", type=int, default=VideoResultPlayerApp.frame_skip_factor,
                             help="Factor by which to voluntarily skip video frames to make them pass faster. "
                                  "If playback feels like it still has too much lag, increasing this value can help by "
-                                 "purposely drop every X frame specified by this ratio. "
+                                 "purposely dropping frames between every X frame interval specified by this factor. "
                                  "(warning: too high value could make the video become like a slide-show) "
                                  "(default: %(default)s, ie: don't skip any frame)")
     log_opts = ap.add_argument_group(title="Logging Options",
