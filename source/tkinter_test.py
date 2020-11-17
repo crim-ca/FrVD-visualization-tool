@@ -1,5 +1,5 @@
 """
-Most basic video-frame loop to evaluate FPS.
+Test video-frame loop processing time required for display with :mod:`tkinter` UI.
 """
 import argparse
 import logging

@@ -49,6 +49,7 @@ class VideoResultPlayerApp(object):
     frame_count = None
     frame_output = None
     frame_drop_factor = 4
+    frame_skip_factor = 1
     last_time = 0
     next_time = 0
     call_cumul_count = 0
@@ -86,7 +87,7 @@ class VideoResultPlayerApp(object):
     NO_DATA = "<no-data>"
 
     def __init__(self, video_file, video_description, video_results, text_annotations,
-                 output=None, scale=1.0, queue_size=10, frame_drop_factor=4):
+                 output=None, scale=1.0, queue_size=10, frame_drop_factor=4, frame_skip_factor=1):
         self.video_source = os.path.abspath(video_file)
         if not os.path.isfile(video_file):
             raise ValueError("Cannot find video file: [{}]".format(video_file))
@@ -103,6 +104,9 @@ class VideoResultPlayerApp(object):
         if frame_drop_factor > 1:
             LOGGER.debug("Setting frame drop factor: %s", frame_drop_factor)
             self.frame_drop_factor = frame_drop_factor
+        if frame_skip_factor > 1:
+            LOGGER.debug("Setting frame skip factor: %s", frame_skip_factor)
+            self.frame_skip_factor = frame_skip_factor
 
         self.setup_player()
         self.setup_window()
@@ -135,69 +139,96 @@ class VideoResultPlayerApp(object):
             self.video_scale = new_scale
 
     def setup_window(self):
+        LOGGER.info("Creating window...")
+        display_width = int(self.video_width * self.video_scale)
+        display_height = int(self.video_height * self.video_scale)
+
         self.window = tk.Tk()
         self.window.title("Video Result Viewer: {}".format(self.video_title))
         self.window.attributes("-fullscreen", False)
         self.window.bind("<F11>",
-                         lambda event: self.window.attributes("-fullscreen", not self.window.attributes("-fullscreen")))
-        self.window.bind("<Escape>", lambda event: self.window.attributes("-fullscreen", False))
+                         lambda _: self.window.attributes("-fullscreen", not self.window.attributes("-fullscreen")))
+        self.window.bind("<Escape>", lambda _: self.window.attributes("-fullscreen", False))
+        self.window.bind("<space>", lambda _: self.toggle_playing())
+
+        padding = 5
+        split_main_left_right = (4, 2)      # number of columns for left/right distribution
+        split_left_top_bottom = (4, 1)      # number of rows for left-size distribution of top/bottom
+        split_right_top_bottom = (1, 4)     # number of rows for right-size distribution of top/bottom
+        panel_video_viewer = tk.Frame(self.window, padx=padding, pady=padding)
+        panel_video_viewer.grid(row=0, column=0,
+                                rowspan=split_main_left_right[0], columnspan=split_left_top_bottom[0], sticky=tk.NSEW)
+        panel_video_infer = tk.Frame(self.window, padx=padding, pady=padding)
+        panel_video_infer.grid(row=0, column=split_main_left_right[0] + 1,
+                               rowspan=split_right_top_bottom[0], columnspan=split_main_left_right[1], sticky=tk.NSEW)
+        panel_video_desc = tk.Frame(self.window, padx=padding, pady=padding)
+        panel_video_desc.grid(row=split_left_top_bottom[0] + 1, column=0,
+                              rowspan=split_left_top_bottom[1], columnspan=split_main_left_right[0], sticky=tk.NSEW)
+        panel_text_annot = tk.Frame(self.window, padx=padding, pady=padding)
+        panel_text_annot.grid(row=split_right_top_bottom[0] + 1, column=split_main_left_right[0] + 1,
+                              rowspan=split_right_top_bottom[1], columnspan=split_main_left_right[1], sticky=tk.NSEW)
+        self.window.grid_columnconfigure(0, weight=0)
+        self.window.grid_columnconfigure(split_main_left_right[0] + 1, weight=1)
+        self.window.grid_rowconfigure(0, weight=0)
+        self.window.grid_rowconfigure(split_left_top_bottom[0] + 1, weight=1)
+        self.window.grid_rowconfigure(split_right_top_bottom[0] + 1, weight=1)
+
         # Create a canvas that can fit the above video source size
-        display_width = int(self.video_width * self.video_scale)
-        display_height = int(self.video_height * self.video_scale)
-        self.video_viewer = tk.Canvas(self.window, width=display_width, height=display_height)
+        self.video_viewer = tk.Canvas(panel_video_viewer, width=display_width, height=display_height)
         self.video_viewer.pack(anchor=tk.NW, fill=tk.BOTH, expand=True)
         # adjust number of labels displayed on slider with somewhat dynamic amount based on video display scaling
         slider_interval = self.frame_count // int(10 * self.video_scale)
         slider_elements = self.frame_count // slider_interval
         slider_interval = self.frame_count // (slider_elements if slider_elements % 2 else slider_elements + 1)
-        self.video_slider = tk.Scale(self.window, from_=0, to=self.frame_count - 1, length=display_width,
+        self.video_slider = tk.Scale(panel_video_viewer, from_=0, to=self.frame_count - 1, length=display_width,
                                      tickinterval=slider_interval, orient=tk.HORIZONTAL,
                                      repeatinterval=1, repeatdelay=1, command=self.seek_frame)
         self.video_slider.bind("<Button-1>", self.trigger_seek)
-        self.video_slider.pack(side=tk.TOP, anchor=tk.NW)
+        self.video_slider.pack(side=tk.TOP, anchor=tk.NW, expand=True)
 
         self.play_state = True
         self.play_text = tk.StringVar()
         self.play_text.set("PAUSE")
-        self.play_button = tk.Button(self.window, width=20, padx=5, pady=5,
+        self.play_button = tk.Button(panel_video_viewer, width=20, padx=padding, pady=padding,
                                      textvariable=self.play_text, command=self.toggle_playing)
         self.play_button.pack(side=tk.LEFT, anchor=tk.NW)
 
-        self.snapshot_button = tk.Button(self.window, text="Snapshot", width=20,  padx=5, pady=5, command=self.snapshot)
+        self.snapshot_button = tk.Button(panel_video_viewer, text="Snapshot",
+                                         width=20,  padx=padding, pady=padding, command=self.snapshot)
         self.snapshot_button.pack(side=tk.LEFT, anchor=tk.NW)
 
-        self.text_annot_label = tk.Label(self.window, text="Text Annotation Metadata", font=self.font_header)
-        self.text_annot_label.pack(side=tk.TOP, fill=tk.X)
-        self.text_annot_textbox = tk.Text(self.window, height=20, width=50)
-        self.text_annot_scroll = tk.Scrollbar(self.window, command=self.text_annot_textbox.yview)
-        self.text_annot_textbox.configure(yscrollcommand=self.text_annot_scroll.set)
-        self.text_annot_textbox.tag_configure(self.font_code_tag, font=self.font_code)
-        self.text_annot_textbox.tag_configure(self.font_normal_tag, font=self.font_normal)
-        self.text_annot_textbox.pack(side=tk.RIGHT)
-        self.text_annot_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.update_text_annot(None)
-
-        self.video_desc_label = tk.Label(self.window, text="Video Description Metadata", font=self.font_header)
+        self.video_desc_label = tk.Label(panel_video_desc, text="Video Description Metadata", font=self.font_header)
         self.video_desc_label.pack(side=tk.TOP)
-        self.video_desc_textbox = tk.Text(self.window, height=10, width=display_width)
-        self.video_desc_scroll = tk.Scrollbar(self.window, command=self.video_desc_textbox.yview)
+        self.video_desc_textbox = tk.Text(panel_video_desc, height=10, wrap=tk.WORD)
+        self.video_desc_scroll = tk.Scrollbar(panel_video_desc, command=self.video_desc_textbox.yview)
         self.video_desc_textbox.configure(yscrollcommand=self.video_desc_scroll.set)
         self.video_desc_textbox.tag_configure(self.font_code_tag, font=self.font_code)
         self.video_desc_textbox.tag_configure(self.font_normal_tag, font=self.font_normal)
-        self.video_desc_textbox.pack(side=tk.BOTTOM, anchor=tk.SW)
-        self.video_desc_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.video_desc_textbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.video_desc_scroll.pack(side=tk.RIGHT, fill=tk.Y, expand=True)
         self.update_video_desc(None)
 
-        self.video_infer_label = tk.Label(self.window, text="Video Inference Metadata", font=self.font_header)
-        self.video_infer_label.pack(side=tk.LEFT)
-        self.video_infer_textbox = tk.Text(self.window, height=20, width=50)
-        self.video_infer_scroll = tk.Scrollbar(self.window, command=self.video_infer_textbox.yview)
+        self.video_infer_label = tk.Label(panel_video_infer, text="Video Inference Metadata", font=self.font_header)
+        self.video_infer_label.pack(side=tk.TOP)
+        self.video_infer_textbox = tk.Text(panel_video_infer)
+        self.video_infer_scroll = tk.Scrollbar(panel_video_infer, command=self.video_infer_textbox.yview)
         self.video_infer_textbox.configure(yscrollcommand=self.video_infer_scroll.set)
         self.video_infer_textbox.tag_configure(self.font_code_tag, font=self.font_code)
         self.video_infer_textbox.tag_configure(self.font_normal_tag, font=self.font_normal)
-        self.video_infer_textbox.pack(side=tk.BOTTOM, anchor=tk.SE)
-        self.video_infer_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.video_infer_textbox.pack(side=tk.LEFT, fill=tk.X, expand=True, anchor=tk.SE)
+        self.video_infer_scroll.pack(side=tk.RIGHT, fill=tk.Y, expand=True)
         self.update_video_infer(None)
+
+        self.text_annot_label = tk.Label(panel_text_annot, text="Text Annotation Metadata", font=self.font_header)
+        self.text_annot_label.pack(side=tk.TOP, fill=tk.X)
+        self.text_annot_textbox = tk.Text(panel_text_annot)
+        self.text_annot_scroll = tk.Scrollbar(panel_text_annot, command=self.text_annot_textbox.yview)
+        self.text_annot_textbox.configure(yscrollcommand=self.text_annot_scroll.set)
+        self.text_annot_textbox.tag_configure(self.font_code_tag, font=self.font_code)
+        self.text_annot_textbox.tag_configure(self.font_normal_tag, font=self.font_normal)
+        self.text_annot_textbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.text_annot_scroll.pack(side=tk.RIGHT, fill=tk.Y, expand=True)
+        self.update_text_annot(None)
 
     def trigger_seek(self, event):
         coord_min = self.video_slider.coords(0)
@@ -217,6 +248,9 @@ class VideoResultPlayerApp(object):
         else:
             ratio = float(self.frame_count) / float(coord_max[0] - coord_min[0])
             index = int((event.x - coord_min[0]) * ratio)
+            while index % self.frame_skip_factor:
+                index += 1
+
         LOGGER.debug("Seek frame %8s from click event (%s, %s) between [%s, %s]",
                      index, event.x, event.y, coord_min, coord_max)
         self.seek_frame(index)
@@ -239,7 +273,8 @@ class VideoResultPlayerApp(object):
             self.video_desc_textbox.insert(tk.END, "", self.font_normal_tag)
             self.video_desc_textbox.insert(tk.END, text, self.font_code_tag)
         else:
-            text = metadata["vd"]
+            entry = "(index: {}, start: {}, end: {})".format(self.video_desc_index, metadata["start"], metadata["end"])
+            text = "{}\n\n{}".format(entry, metadata["vd"])
             self.video_desc_textbox.insert(tk.END, text, self.font_normal_tag)
             self.video_desc_textbox.insert(tk.END, "", self.font_code_tag)
 
@@ -250,7 +285,8 @@ class VideoResultPlayerApp(object):
             self.video_infer_textbox.insert(tk.END, "", self.font_normal_tag)
             self.video_infer_textbox.insert(tk.END, text, self.font_code_tag)
         else:
-            header = "[Score] [Classes] (index = {})\n\n".format(self.video_infer_index)
+            entry = "(index: {}, start: {}, end: {})".format(self.video_infer_index, metadata["start"], metadata["end"])
+            header = "{}\n\n[Score] [Classes]\n\n".format(entry)
             values = "\n".join(["[{:.2f}] {}".format(s, c) for c, s in zip(metadata["classes"], metadata["scores"])])
             text = header + values
             self.video_infer_textbox.insert(tk.END, "", self.font_normal_tag)
@@ -264,11 +300,13 @@ class VideoResultPlayerApp(object):
             self.text_annot_textbox.insert(tk.END, text, self.font_code_tag)
         else:
             annotations = metadata["annotations"]
-            fmt = "  {:<16s} | {:<16s} | {:<16s}"
+            fmt = "      {:<16s} | {:<24s} | {:<16s}"
             fields = "POS", "type", "lemme"
-            text = fmt.format(*fields)
+            header = fmt.format(*fields)
+            entry = "(index: {}, start: {}, end: {})".format(self.text_annot_index, metadata["start"], metadata["end"])
+            text = "{}\n\n{}\n{}\n".format(entry, header, "_" * len(header))
             for i, annot in enumerate(annotations):
-                text += "[{}]:\n".format(i)
+                text += "\n[{}]:\n".format(i)
                 text += "\n".join([fmt.format(*[item[f] for f in fields]) for item in annot])
             self.text_annot_textbox.insert(tk.END, "", self.font_normal_tag)
             self.text_annot_textbox.insert(tk.END, text, self.font_code_tag)
@@ -337,6 +375,11 @@ class VideoResultPlayerApp(object):
         call_msec_delta = call_time_delta * 1000.
         call_fps = 1. / call_time_delta
 
+        if self.frame_index not in [0, self.frame_count] and self.frame_index % self.frame_skip_factor:
+            LOGGER.debug("Skip Frame: %8s", self.frame_index)
+            self.window.after(1, self.update_video)
+            return
+
         if call_msec_delta > self.frame_delta * self.frame_drop_factor and self.frame_index > 1:
             LOGGER.warning("Drop Frame: %8s, Last: %8.2f, Time: %8.2f, Real Delta: %6.2fms, "
                            "Target Delta: %6.2fms, Call Delta: %6.2fms, Real FPS: %6.2f",
@@ -344,17 +387,15 @@ class VideoResultPlayerApp(object):
                            self.frame_delta, call_msec_delta, call_fps)
             self.window.after(1, self.update_video)
             return
-        wait_time_delta = 1  # WARNING: just go as fast as possible... tkinter image convert is the limiting factor
 
         self.call_cumul_value += call_time_delta
         self.call_cumul_count += 1
-        call_avg_fps = (self.call_cumul_value / self.call_cumul_count)
+        call_avg_fps = self.call_cumul_count / self.call_cumul_value
 
         frame_dims = (self.video_width, self.video_height)
         if self.video_scale != 1:
             frame_dims = (int(self.video_width * self.video_scale), int(self.video_height * self.video_scale))
             frame = cv.resize(frame, frame_dims, interpolation=cv.INTER_NEAREST)
-        self.update_metadata()
 
         LOGGER.debug("Show Frame: %8s, Last: %8.2f, Time: %8.2f, Real Delta: %6.2fms, "
                      "Target Delta: %6.2fms, Call Delta: %6.2fms, Real FPS: %6.2f (%.2f) WxH: %s",
@@ -362,27 +403,33 @@ class VideoResultPlayerApp(object):
                      self.frame_delta, call_msec_delta, call_fps, call_avg_fps, frame_dims)
 
         # display basic information
-        text_position = (10, 25)
+        text_offset = (10, 25)
         text_delta = 40
         font_scale = 0.5
         font_color = (209, 80, 0, 255)
         font_stroke = 1
-        text = "Title: {}, Target FPS: {}, Real FPS: {:0.2f} ({:0.2f})" \
-               .format(self.video_title, self.frame_fps, call_fps, call_avg_fps)
-        cv.putText(frame, text, text_position, cv.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_stroke)
-        text_position = (text_position[0], text_position[1] + int(text_delta * font_scale))
+        text0 = "Title: {}".format(self.video_title)
+        text1 = "Original FPS: {}, Process FPS: {:0.2f} ({:0.2f})".format(self.frame_fps, call_fps, call_avg_fps)
         cur_sec = self.frame_time / 1000.
         tot_sec = self.video_duration / 1000.
         cur_hms = time.strftime("%H:%M:%S", time.gmtime(cur_sec))
         tot_hms = time.strftime("%H:%M:%S", time.gmtime(tot_sec))
-        text = "Time: {:0>.2f}/{:0.2f} ({}/{}) Frame: {}".format(cur_sec, tot_sec, cur_hms, tot_hms, self.frame_index)
-        cv.putText(frame, text, text_position, cv.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_stroke)
+        text2 = "Time: {:0>.2f}/{:0.2f} ({}/{}) Frame: {}".format(cur_sec, tot_sec, cur_hms, tot_hms, self.frame_index)
+        for text_row, text in [(0, text0), (-2, text1), (-1, text2)]:
+            y_offset = int(text_delta * font_scale) * text_row
+            if text_row < 0:
+                y_offset = self.video_height + (y_offset - text_offset[1])
+            text_pos = (text_offset[0], text_offset[1] + y_offset)
+            cv.putText(frame, text, text_pos, cv.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_stroke)
 
         # note: 'self.frame' is important as without instance reference, it gets garbage collected and is not displayed
         self.video_frame = frame  # in case of snapshot
         self.frame = PIL.ImageTk.PhotoImage(image=PIL.Image.fromarray(cv.cvtColor(frame, cv.COLOR_RGB2BGR)))
         self.video_viewer.create_image(0, 0, image=self.frame, anchor=tk.NW)
         self.video_slider.set(self.frame_index)
+        self.update_metadata()
+
+        wait_time_delta = 1  # WARNING: just go as fast as possible... tkinter image convert is the limiting factor
         self.window.after(math.floor(wait_time_delta), self.update_video)
         self.video_viewer.update_idletasks()
 
@@ -437,7 +484,7 @@ class VideoResultPlayerApp(object):
             collection = meta.get("serie_collection_name") or meta.get("film_collection_name")
 
             LOGGER.debug("Updating video name")
-            episode_str = " - {}".format(episode) if episode else ""
+            episode_str = " - Episode {}".format(episode) if episode else ""
             self.video_title = "[{}] {}{}".format(collection, title, episode_str)
 
             meta_vd = metadata.get("augmented_vd_metadata")
@@ -448,6 +495,12 @@ class VideoResultPlayerApp(object):
                 if meta_vd:
                     LOGGER.info("Retrieved standard video-description metadata (augmented not provided).")
             if meta_vd:
+                # backup original timestamps and update with second times
+                for meta in meta_vd:
+                    meta["start_ts"] = meta["start"]
+                    meta["start"] = meta["start_ms"] / 1000.
+                    meta["end_ts"] = meta["end"]
+                    meta["end"] = meta["end_ms"] / 1000.
                 # ensure sorted entries
                 return list(sorted(meta_vd, key=lambda vd: vd["start_ms"]))
         except Exception as exc:
@@ -478,10 +531,14 @@ class VideoResultPlayerApp(object):
             annotations = metadata["data"]
             for annot in annotations:
                 # convert TS: [start,end] -> start_ms, end_ms
-                ts = datetime.strptime(annot["TS"][0], "T%H:%M:%S.%f")
-                te = datetime.strptime(annot["TS"][1], "T%H:%M:%S.%f")
-                annot["start_ms"] = (ts.hour * 3600 + ts.minute * 60 + ts.second) * 1000 + ts.microsecond
-                annot["end_ms"] = (te.hour * 3600 + te.minute * 60 + te.second) * 1000 + te.microsecond
+                ts_s = datetime.strptime(annot["TS"][0], "T%H:%M:%S.%f")
+                ts_e = datetime.strptime(annot["TS"][1], "T%H:%M:%S.%f")
+                sec_s = float("{}.{}".format((ts_s.hour * 3600 + ts_s.minute * 60 + ts_s.second), ts_s.microsecond))
+                sec_e = float("{}.{}".format((ts_e.hour * 3600 + ts_e.minute * 60 + ts_e.second), ts_e.microsecond))
+                annot["start_ms"] = sec_s * 1000.
+                annot["end_ms"] = sec_e * 1000.
+                annot["start"] = sec_s
+                annot["end"] = sec_e
             return list(sorted(annotations, key=lambda a: a["start_ms"]))
         except Exception as exc:
             LOGGER.error("Could not parse text inference metadata file: [%s]", metadata_path, exc_info=exc)
@@ -527,9 +584,15 @@ def make_parser():
     video_opts.add_argument("--queue", "-Q", type=int, default=VideoResultPlayerApp.frame_queue, dest="queue_size",
                             help="Queue size to attempt preloading frames "
                                  "(warning: impacts FPS) (default: %(default)s).")
-    video_opts.add_argument("--frame-drop-factor", "--fdf", type=int, default=VideoResultPlayerApp.frame_drop_factor,
+    video_opts.add_argument("--frame-drop-factor", "--drop", type=int, default=VideoResultPlayerApp.frame_drop_factor,
                             help="Factor by which the delayed video frames should be dropped if exceeding target FPS. "
                                  "Avoids long sporadic lags (default: %(default)s).")
+    video_opts.add_argument("--frame-skip-factor", "--skip", type=int, default=VideoResultPlayerApp.frame_skip_factor,
+                            help="Factor by which to voluntarily skip video frames to make them pass faster. "
+                                 "If playback feels like it still has too much lag, increasing this value can help by "
+                                 "purposely drop every X frame specified by this ratio. "
+                                 "(warning: too high value could make the video become like a slide-show) "
+                                 "(default: %(default)s, ie: don't skip any frame)")
     log_opts = ap.add_argument_group(title="Logging Options",
                                      description="Options that configure output logging.")
     log_opts.add_argument("--quiet", "-q", action="store_true", help="Do not output anything else than error.")
