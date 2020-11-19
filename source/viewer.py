@@ -568,8 +568,9 @@ def make_parser():
     main_args.add_argument("video_file", help="Video file to view.")
     main_args.add_argument("--video-description", "--vd", dest="video_description",
                            help="JSON metadata file with original video-description annotations.")
-    main_args.add_argument("--video-inference", "--vi", dest="video_results",
-                           help="JSON metadata file with video action recognition inference results.")
+    main_args.add_argument("--video-inference", "--vi", nargs="*", dest="video_results",
+                           help="JSON metadata file(s) with video action recognition inference results. "
+                                "If multiple files are provided, they will be simultaneously displayed side-by-side.")
     main_args.add_argument("--text-annotation", "--ta", dest="text_annotations",
                            help="JSON metadata file with text subjects and verbs annotations.")
     util_opts = ap.add_argument_group(title="Utility Options",
