@@ -9,6 +9,7 @@ import os
 import sys
 import time
 from datetime import datetime
+from typing import Dict, List, Optional
 
 import cv2 as cv
 import PIL.Image
@@ -56,23 +57,24 @@ class VideoResultPlayerApp(object):
     call_cumul_value = 0
     # metadata references
     video_desc_meta = None
-    video_desc_index = None
+    video_desc_index = None     # type: Optional[int]
     video_infer_meta = None
-    video_infer_index = None
+    video_infer_indices = None  # type: Optional[List[int]]
     text_annot_meta = None
-    text_annot_index = None
+    text_annot_index = None     # type: Optional[int]
     # handles to UI elements
     window = None
     video_viewer = None
     video_slider = None
     video_desc_label = None
-    video_desc_scroll = None
+    video_desc_scrollY = None
     video_desc_textbox = None
     video_infer_label = None
-    video_infer_scroll = None
+    video_infer_scrollX = None
+    video_infer_scrollY = None
     video_infer_textbox = None
     text_annot_label = None
-    text_annot_scroll = None
+    text_annot_scrollY = None
     text_annot_textbox = None
     snapshot_button = None
     play_button = None
@@ -200,35 +202,44 @@ class VideoResultPlayerApp(object):
         self.video_desc_label = tk.Label(panel_video_desc, text="Video Description Metadata", font=self.font_header)
         self.video_desc_label.pack(side=tk.TOP)
         self.video_desc_textbox = tk.Text(panel_video_desc, height=10, wrap=tk.WORD)
-        self.video_desc_scroll = tk.Scrollbar(panel_video_desc, command=self.video_desc_textbox.yview)
-        self.video_desc_textbox.configure(yscrollcommand=self.video_desc_scroll.set)
+        self.video_desc_scrollY = tk.Scrollbar(panel_video_desc, command=self.video_desc_textbox.yview)
+        self.video_desc_textbox.configure(yscrollcommand=self.video_desc_scrollY.set)
         self.video_desc_textbox.tag_configure(self.font_code_tag, font=self.font_code)
         self.video_desc_textbox.tag_configure(self.font_normal_tag, font=self.font_normal)
         self.video_desc_textbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.video_desc_scroll.pack(side=tk.RIGHT, fill=tk.Y, expand=True)
-        self.update_video_desc(None)
+        self.video_desc_scrollY.pack(side=tk.RIGHT, fill=tk.Y, expand=True)
+        self.update_video_desc()
 
         self.video_infer_label = tk.Label(panel_video_infer, text="Video Inference Metadata", font=self.font_header)
         self.video_infer_label.pack(side=tk.TOP)
-        self.video_infer_textbox = tk.Text(panel_video_infer)
-        self.video_infer_scroll = tk.Scrollbar(panel_video_infer, command=self.video_infer_textbox.yview)
-        self.video_infer_textbox.configure(yscrollcommand=self.video_infer_scroll.set)
+        video_infer_xy_scroll_box = tk.Frame(panel_video_infer, padx=0, pady=0)
+        video_infer_xy_scroll_box.pack()
+        self.video_infer_textbox = tk.Text(video_infer_xy_scroll_box, wrap=tk.NONE)
+        self.video_infer_scrollX = tk.Scrollbar(video_infer_xy_scroll_box, orient=tk.HORIZONTAL,
+                                                command=self.video_infer_textbox.xview)
+        self.video_infer_scrollY = tk.Scrollbar(video_infer_xy_scroll_box, orient=tk.VERTICAL,
+                                                command=self.video_infer_textbox.yview)
+        self.video_infer_textbox.configure(xscrollcommand=self.video_infer_scrollX.set,
+                                           yscrollcommand=self.video_infer_scrollY.set)
         self.video_infer_textbox.tag_configure(self.font_code_tag, font=self.font_code)
         self.video_infer_textbox.tag_configure(self.font_normal_tag, font=self.font_normal)
-        self.video_infer_textbox.pack(side=tk.LEFT, fill=tk.X, expand=True, anchor=tk.SE)
-        self.video_infer_scroll.pack(side=tk.RIGHT, fill=tk.Y, expand=True)
-        self.update_video_infer(None)
+        self.video_infer_textbox.grid(row=0, column=0, sticky=tk.NSEW)
+        self.video_infer_scrollY.grid(row=0, column=1, sticky=tk.NS)
+        self.video_infer_scrollX.grid(row=1, column=0, sticky=tk.EW)
+        video_infer_xy_scroll_box.grid_rowconfigure(0, weight=1)
+        video_infer_xy_scroll_box.grid_columnconfigure(0, weight=1)
+        self.update_video_infer()
 
         self.text_annot_label = tk.Label(panel_text_annot, text="Text Annotation Metadata", font=self.font_header)
         self.text_annot_label.pack(side=tk.TOP, fill=tk.X)
         self.text_annot_textbox = tk.Text(panel_text_annot)
-        self.text_annot_scroll = tk.Scrollbar(panel_text_annot, command=self.text_annot_textbox.yview)
-        self.text_annot_textbox.configure(yscrollcommand=self.text_annot_scroll.set)
+        self.text_annot_scrollY = tk.Scrollbar(panel_text_annot, command=self.text_annot_textbox.yview)
+        self.text_annot_textbox.configure(yscrollcommand=self.text_annot_scrollY.set)
         self.text_annot_textbox.tag_configure(self.font_code_tag, font=self.font_code)
         self.text_annot_textbox.tag_configure(self.font_normal_tag, font=self.font_normal)
         self.text_annot_textbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.text_annot_scroll.pack(side=tk.RIGHT, fill=tk.Y, expand=True)
-        self.update_text_annot(None)
+        self.text_annot_scrollY.pack(side=tk.RIGHT, fill=tk.Y, expand=True)
+        self.update_text_annot()
 
     def trigger_seek(self, event):
         coord_min = self.video_slider.coords(0)
@@ -266,44 +277,76 @@ class VideoResultPlayerApp(object):
             LOGGER.debug("Video resume.")
         self.play_state = not self.play_state
 
-    def update_video_desc(self, metadata):
+    def update_video_desc(self, metadata=None, indices=None):
         self.video_desc_textbox.delete("1.0", tk.END)
         if metadata is None:
             text = self.NO_DATA
             self.video_desc_textbox.insert(tk.END, "", self.font_normal_tag)
             self.video_desc_textbox.insert(tk.END, text, self.font_code_tag)
         else:
-            entry = "(index: {}, start: {}, end: {})".format(self.video_desc_index, metadata["start"], metadata["end"])
+            # only one dimension for this kind of annotation
+            index = indices[0]
+            metadata = metadata[0][index]
+            # display plain video description text
+            entry = "(index: {}, start: {:.2f}, end: {:.2f})".format(index, metadata["start"], metadata["end"])
             text = "{}\n\n{}".format(entry, metadata["vd"])
             self.video_desc_textbox.insert(tk.END, text, self.font_normal_tag)
             self.video_desc_textbox.insert(tk.END, "", self.font_code_tag)
 
-    def update_video_infer(self, metadata):
+    @staticmethod
+    def format_video_infer(number, index, metadata):
+        """
+        Format a single video inference metadata file into lines to be displayed.
+        """
+        meta = metadata[index]
+        entry = "(file: {}, index: {})".format(number, index)
+        times = "(start: {:.2f}, end: {:.2f})".format(meta["start"], meta["end"])
+        header = "[Score] [Classes]"
+        values = ["[{:.2f}] {}".format(s, c) for c, s in zip(meta["classes"], meta["scores"])]
+        return [entry, times, "", header] + values
+
+    def update_video_infer(self, metadata=None, indices=None):
+        """
+        Format video inference metadata entries side-by-side from N sources.
+        """
         self.video_infer_textbox.delete("1.0", tk.END)
         if metadata is None:
             text = self.NO_DATA
             self.video_infer_textbox.insert(tk.END, "", self.font_normal_tag)
             self.video_infer_textbox.insert(tk.END, text, self.font_code_tag)
         else:
-            entry = "(index: {}, start: {}, end: {})".format(self.video_infer_index, metadata["start"], metadata["end"])
-            header = "{}\n\n[Score] [Classes]\n\n".format(entry)
-            values = "\n".join(["[{:.2f}] {}".format(s, c) for c, s in zip(metadata["classes"], metadata["scores"])])
-            text = header + values
+            text = ""
+            meta_lines = [
+                self.format_video_infer(number, index, meta)
+                for number, (index, meta) in enumerate(zip(indices, metadata))
+            ]
+            # display lines ordered from top-1 to lowest top-k, with possibility variable amounts for each
+            max_lines = max([len(lines) for lines in meta_lines])
+            for line_index in range(max_lines):
+                for meta in meta_lines:
+                    line = meta[line_index] if line_index < len(meta) else ""
+                    # reasonable padding to align columns, adjust if class names are too long to display
+                    text += "{:<32s}".format(line)
+                text += "\n"
             self.video_infer_textbox.insert(tk.END, "", self.font_normal_tag)
             self.video_infer_textbox.insert(tk.END, text, self.font_code_tag)
 
-    def update_text_annot(self, metadata):
+    def update_text_annot(self, metadata=None, indices=None):
         self.text_annot_textbox.delete("1.0", tk.END)
         if metadata is None:
             text = self.NO_DATA
             self.text_annot_textbox.insert(tk.END, "", self.font_normal_tag)
             self.text_annot_textbox.insert(tk.END, text, self.font_code_tag)
         else:
+            # only one dimension for this kind of annotation
+            index = indices[0]
+            metadata = metadata[0][index]
+            # update displayed metadata as text table
             annotations = metadata["annotations"]
             fmt = "      {:<16s} | {:<24s} | {:<16s}"
             fields = "POS", "type", "lemme"
             header = fmt.format(*fields)
-            entry = "(index: {}, start: {}, end: {})".format(self.text_annot_index, metadata["start"], metadata["end"])
+            entry = "(index: {}, start: {:.2f}, end: {:.2f})".format(index, metadata["start"], metadata["end"])
             text = "{}\n\n{}\n{}\n".format(entry, header, "_" * len(header))
             for i, annot in enumerate(annotations):
                 text += "\n[{}]:\n".format(i)
@@ -324,29 +367,42 @@ class VideoResultPlayerApp(object):
             """
             # update only if metadata container entries are available
             if meta_container:
-                current_index = 0 if seek else meta_index
-                updated_index = current_index  # if nothing needs to change (current on is still valid for timestamp)
-                current_meta = meta_container[current_index]
-                index_total = len(meta_container)
-                if seek:
-                    # search the earliest index that provides metadata within the new time
-                    for index in range(index_total):
-                        meta = meta_container[index]
-                        if meta["start_ms"] >= self.frame_time:
-                            updated_index = index
-                            break
-                elif self.frame_time > current_meta["end_ms"]:
-                    # otherwise bump to next one if timestamp of the current is passed
-                    updated_index = current_index + 1
+                # convert containers to 2D list regardless of original inputs
+                if not isinstance(meta_index, list):
+                    meta_index = [meta_index]
+                    meta_container = [meta_container]
+                if not isinstance(meta_container[0], list):
+                    meta_container = [meta_container]
 
-                # apply change of metadata
-                if meta_index < index_total - 1 and current_index != updated_index or updated_index == 0:
-                    meta_updater(meta_container[updated_index])
-                return updated_index
+                must_update = False
+                computed_indices = []
+                for i, index in enumerate(meta_index):
+                    current_index = 0 if seek else index
+                    updated_index = current_index  # if nothing needs to change (current is still valid for timestamp)
+                    current_meta = meta_container[i][current_index]  # type: dict
+                    index_total = len(meta_container[i])
+                    if seek:
+                        # search the earliest index that provides metadata within the new time
+                        for idx in range(index_total):
+                            meta = meta_container[i][idx]
+                            if meta["start_ms"] >= self.frame_time:
+                                updated_index = idx
+                                break
+                    elif self.frame_time > current_meta["end_ms"]:
+                        # otherwise bump to next one if timestamp of the current is passed
+                        updated_index = current_index + 1
+
+                    # apply change of metadata, update all meta of each stack if any must be changed
+                    if index < index_total - 1 and current_index != updated_index or updated_index == 0:
+                        must_update = True
+                    computed_indices.append(updated_index)
+                if must_update:
+                    meta_updater(meta_container, computed_indices)
+                return computed_indices
             return None
 
         self.video_desc_index = update_meta(self.video_desc_meta, self.video_desc_index, self.update_video_desc)
-        self.video_infer_index = update_meta(self.video_infer_meta, self.video_infer_index, self.update_video_infer)
+        self.video_infer_indices = update_meta(self.video_infer_meta, self.video_infer_indices, self.update_video_infer)
         self.text_annot_index = update_meta(self.text_annot_meta, self.text_annot_index, self.update_text_annot)
 
     def update_video(self):
@@ -460,10 +516,16 @@ class VideoResultPlayerApp(object):
                 LOGGER.info("Parsing video description metadata [%s]...", video_description)
                 self.video_desc_meta = self.parse_video_annotation_metadata(video_description)
                 self.video_desc_index = 0
-            if video_results and os.path.isfile(video_results):
-                LOGGER.info("Parsing video inference metadata [%s]...", video_results)
-                self.video_infer_meta = self.parse_video_inference_metadata(video_results)
-                self.video_infer_index = 0
+            if video_results and isinstance(video_results, list):
+                for result in video_results:
+                    if os.path.isfile(result):
+                        LOGGER.info("Parsing video inference metadata [%s]...", video_results)
+                    meta = self.parse_video_inference_metadata(result)
+                    if not self.video_infer_meta:
+                        self.video_infer_meta = []
+                        self.video_infer_indices = []
+                    self.video_infer_meta.append(meta)
+                    self.video_infer_indices.append(0)
             if text_annotations and os.path.isfile(text_annotations):
                 LOGGER.info("Parsing text inference metadata [%s]...", text_annotations)
                 self.text_annot_meta = self.parse_text_annotations_metadata(text_annotations)
