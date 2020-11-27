@@ -63,6 +63,8 @@ class VideoCaptureThread(object):
 
     def seek(self, frame_index):
         self.stop()
+        # max value -2 to avoid immediate freeze on next fetch
+        frame_index = min(frame_index, self.get(cv.CAP_PROP_FRAME_COUNT) - 2)
         self.set(cv.CAP_PROP_POS_FRAMES, frame_index)
         ms = self.get(cv.CAP_PROP_POS_MSEC)
         with self.read_lock:
