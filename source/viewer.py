@@ -74,6 +74,7 @@ class VideoResultPlayerApp(object):
     video_infer_scrollY = None
     video_infer_textbox = None
     text_annot_label = None
+    text_annot_scrollX = None
     text_annot_scrollY = None
     text_annot_textbox = None
     snapshot_button = None
@@ -242,13 +243,22 @@ class VideoResultPlayerApp(object):
 
         self.text_annot_label = tk.Label(panel_text_annot, text="Text Annotation Metadata", font=self.font_header)
         self.text_annot_label.pack(side=tk.TOP, fill=tk.X)
-        self.text_annot_textbox = tk.Text(panel_text_annot)
-        self.text_annot_scrollY = tk.Scrollbar(panel_text_annot, command=self.text_annot_textbox.yview)
-        self.text_annot_textbox.configure(yscrollcommand=self.text_annot_scrollY.set)
+        text_annot_xy_scroll_box = tk.Frame(panel_text_annot, padx=0, pady=0)
+        text_annot_xy_scroll_box.pack()
+        self.text_annot_textbox = tk.Text(text_annot_xy_scroll_box, wrap=tk.NONE)
+        self.text_annot_scrollX = tk.Scrollbar(text_annot_xy_scroll_box, orient=tk.HORIZONTAL,
+                                               command=self.text_annot_textbox.xview)
+        self.text_annot_scrollY = tk.Scrollbar(text_annot_xy_scroll_box, orient=tk.VERTICAL,
+                                               command=self.text_annot_textbox.yview)
+        self.text_annot_textbox.configure(xscrollcommand=self.text_annot_scrollX.set,
+                                          yscrollcommand=self.text_annot_scrollY.set)
         self.text_annot_textbox.tag_configure(self.font_code_tag, font=self.font_code)
         self.text_annot_textbox.tag_configure(self.font_normal_tag, font=self.font_normal)
-        self.text_annot_textbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.text_annot_scrollY.pack(side=tk.RIGHT, fill=tk.Y, expand=True)
+        self.text_annot_textbox.grid(row=0, column=0, sticky=tk.NSEW)
+        self.text_annot_scrollX.grid(row=0, column=1, sticky=tk.NS)
+        self.text_annot_scrollX.grid(row=1, column=0, sticky=tk.EW)
+        text_annot_xy_scroll_box.grid_rowconfigure(0, weight=1)
+        text_annot_xy_scroll_box.grid_columnconfigure(0, weight=1)
         self.update_text_annot()
 
     def trigger_seek(self, event):
@@ -353,7 +363,7 @@ class VideoResultPlayerApp(object):
             metadata = metadata[0][index]
             # update displayed metadata as text table
             annotations = metadata["annotations"]
-            fmt = "      {:<16s} | {:<24s} | {:<16s}"
+            fmt = "    {:<16s} | {:<24s} | {:<16s}"
             fields = "POS", "type", "lemme"
             header = fmt.format(*fields)
             entry = "(index: {}, start: {:.2f}, end: {:.2f})".format(index, metadata["start"], metadata["end"])
@@ -793,9 +803,29 @@ class VideoResultPlayerApp(object):
                 annot["start"] = sec_s
                 annot["end"] = sec_e
                 # extend 2D list into sentences/words metadata and drop redundant VD
-                sentences = [s + "." if not s.endswith(".") else s for s in annot.pop("vd", "").split(". ")]
-                for i, (s, a) in enumerate(zip(sentences, list(annot["annotations"]))):
-                    annot["annotations"][i] = {"sentence": s, "words": a}
+                vd = annot.pop("vd", "")
+                sentences = [s + "." if not s.endswith(".") else s for s in vd.split(". ")]
+                annot_list = list(annot["annotations"])  # ensure copy to avoid edit error while iterating
+                # note:
+                #  Original annotations sometime have errors due to capital letters incorrectly interpreted
+                #  as beginning of new sentence.
+                #  Sometimes, they are instead missing some annotations against the number of sentences.
+                #  Patch them as best as possible.
+                while len(sentences) != len(annot_list):
+                    if len(sentences) > len(annot_list):
+                        # pad extra empty annotations where no lemme can be matched within the current sentence
+                        # if matched, move to next to find the best index at which to insert empty annotations
+                        i = 0
+                        for i, s in enumerate(sentences):
+                            if i >= len(annot_list):
+                                break
+                            if not any([a["lemme"].replace("_", " ") in s for a in annot_list[i]]):
+                                break
+                        annot_list.insert(i, [])
+                    else:
+                        # merge over abundant annotations
+                        annot_list[0].extend(annot_list.pop(1))
+                annot["annotations"] = [{"sentence": s, "words": a} for s, a in zip(sentences, annot_list)]
             return list(sorted(annotations, key=lambda _a: _a[self.ts_key])), metadata
         except Exception as exc:
             LOGGER.error("Could not parse text inference metadata file: [%s]", metadata_path, exc_info=exc)
