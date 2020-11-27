@@ -16,7 +16,7 @@ import PIL.Image
 import PIL.ImageTk
 import tkinter as tk
 
-from stream import VideoCaptureThread  # noqa
+from stream import VideoCaptureThread
 
 __NAME__ = os.path.splitext(os.path.split(__file__)[-1])[0]
 LOGGER = logging.getLogger(__NAME__)
@@ -56,6 +56,10 @@ class VideoResultPlayerApp(object):
     call_cumul_count = 0
     call_cumul_value = 0
     # metadata references
+    NO_DATA_TEXT = "<no-metadata>"
+    NO_MORE_TEXT = "(metadata exhausted)"
+    NO_DATA_INDEX = None
+    NO_MORE_INDEX = -1
     video_desc_meta = None
     video_desc_index = None     # type: Optional[int]
     video_infer_meta = None
@@ -87,7 +91,6 @@ class VideoResultPlayerApp(object):
     font_normal = ("Times", 12, "normal")
     font_code_tag = "code"
     font_normal_tag = "normal"
-    NO_DATA = "<no-data>"
     # shared metadata keys
     vd_key = "video_description"
     ta_key = "text_annotation"
@@ -126,6 +129,7 @@ class VideoResultPlayerApp(object):
         if video_file is None:
             LOGGER.info("No video to display")
             return
+        self.update_metadata(seek=True)
         self.run()
 
     def run(self):
@@ -212,13 +216,17 @@ class VideoResultPlayerApp(object):
 
         self.video_desc_label = tk.Label(panel_video_desc, text="Video Description Metadata", font=self.font_header)
         self.video_desc_label.pack(side=tk.TOP)
-        self.video_desc_textbox = tk.Text(panel_video_desc, height=10, wrap=tk.WORD)
-        self.video_desc_scrollY = tk.Scrollbar(panel_video_desc, command=self.video_desc_textbox.yview)
+        video_desc_xy_scroll_box = tk.Frame(panel_video_desc, padx=0, pady=0)
+        video_desc_xy_scroll_box.pack(fill=tk.BOTH, expand=True)
+        self.video_desc_textbox = tk.Text(video_desc_xy_scroll_box, height=10, wrap=tk.WORD)
+        self.video_desc_scrollY = tk.Scrollbar(video_desc_xy_scroll_box, command=self.video_desc_textbox.yview)
         self.video_desc_textbox.configure(yscrollcommand=self.video_desc_scrollY.set)
         self.video_desc_textbox.tag_configure(self.font_code_tag, font=self.font_code)
         self.video_desc_textbox.tag_configure(self.font_normal_tag, font=self.font_normal)
-        self.video_desc_textbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.video_desc_scrollY.pack(side=tk.RIGHT, fill=tk.Y, expand=True)
+        self.video_desc_textbox.grid(row=0, column=0, sticky=tk.NSEW)
+        self.video_desc_scrollY.grid(row=0, column=1, sticky=tk.NS)
+        video_desc_xy_scroll_box.grid_rowconfigure(0, weight=1)
+        video_desc_xy_scroll_box.grid_columnconfigure(0, weight=1)
         self.update_video_desc()
 
         self.video_infer_label = tk.Label(panel_video_infer, text="Video Inference Metadata", font=self.font_header)
@@ -244,7 +252,7 @@ class VideoResultPlayerApp(object):
         self.text_annot_label = tk.Label(panel_text_annot, text="Text Annotation Metadata", font=self.font_header)
         self.text_annot_label.pack(side=tk.TOP, fill=tk.X)
         text_annot_xy_scroll_box = tk.Frame(panel_text_annot, padx=0, pady=0)
-        text_annot_xy_scroll_box.pack()
+        text_annot_xy_scroll_box.pack(fill=tk.BOTH, expand=True)
         self.text_annot_textbox = tk.Text(text_annot_xy_scroll_box, wrap=tk.NONE)
         self.text_annot_scrollX = tk.Scrollbar(text_annot_xy_scroll_box, orient=tk.HORIZONTAL,
                                                command=self.text_annot_textbox.xview)
@@ -255,7 +263,7 @@ class VideoResultPlayerApp(object):
         self.text_annot_textbox.tag_configure(self.font_code_tag, font=self.font_code)
         self.text_annot_textbox.tag_configure(self.font_normal_tag, font=self.font_normal)
         self.text_annot_textbox.grid(row=0, column=0, sticky=tk.NSEW)
-        self.text_annot_scrollX.grid(row=0, column=1, sticky=tk.NS)
+        self.text_annot_scrollY.grid(row=0, column=1, sticky=tk.NS)
         self.text_annot_scrollX.grid(row=1, column=0, sticky=tk.EW)
         text_annot_xy_scroll_box.grid_rowconfigure(0, weight=1)
         text_annot_xy_scroll_box.grid_columnconfigure(0, weight=1)
@@ -285,7 +293,6 @@ class VideoResultPlayerApp(object):
         LOGGER.debug("Seek frame %8s from click event (%s, %s) between [%s, %s]",
                      index, event.x, event.y, coord_min, coord_max)
         self.seek_frame(index)
-        self.update_metadata(seek=True)  # enforce fresh update since everything changed drastically
         self.play_state = True   # resume
 
     def toggle_playing(self):
@@ -299,10 +306,12 @@ class VideoResultPlayerApp(object):
 
     def update_video_desc(self, metadata=None, indices=None):
         self.video_desc_textbox.delete("1.0", tk.END)
-        if metadata is None:
-            text = self.NO_DATA
-            self.video_desc_textbox.insert(tk.END, "", self.font_normal_tag)
-            self.video_desc_textbox.insert(tk.END, text, self.font_code_tag)
+        if not metadata or not indices:
+            text = self.NO_DATA_TEXT
+        elif indices[0] == self.NO_DATA_INDEX:
+            text = self.NO_DATA_TEXT
+        elif indices[0] == self.NO_MORE_INDEX:
+            text = self.NO_MORE_TEXT
         else:
             # only one dimension for this kind of annotation
             index = indices[0]
@@ -310,16 +319,20 @@ class VideoResultPlayerApp(object):
             # display plain video description text
             entry = "(index: {}, start: {:.2f}, end: {:.2f})".format(index, metadata["start"], metadata["end"])
             text = "{}\n\n{}".format(entry, metadata["vd"])
-            self.video_desc_textbox.insert(tk.END, text, self.font_normal_tag)
-            self.video_desc_textbox.insert(tk.END, "", self.font_code_tag)
+        self.video_desc_textbox.insert(tk.END, text, self.font_normal_tag)
+        self.video_desc_textbox.insert(tk.END, "", self.font_code_tag)
 
-    @staticmethod
-    def format_video_infer(number, index, metadata):
+    def format_video_infer(self, number, index, metadata):
         """
         Format a single video inference metadata file into lines to be displayed.
         """
+        template = "(file: {}, index: {})"
+        if index == self.NO_MORE_INDEX:
+            return [template.format(number, len(metadata)), self.NO_MORE_TEXT]
+        if index == self.NO_DATA_INDEX:
+            return [template.format(number, "n/a"), self.NO_DATA_TEXT]
         meta = metadata[index]
-        entry = "(file: {}, index: {})".format(number, index)
+        entry = template.format(number, index)
         times = "(start: {:.2f}, end: {:.2f})".format(meta["start"], meta["end"])
         header = "[Score] [Classes]"
         values = ["[{:.2f}] {}".format(s, c) for c, s in zip(meta["classes"], meta["scores"])]
@@ -330,10 +343,8 @@ class VideoResultPlayerApp(object):
         Format video inference metadata entries side-by-side from N sources.
         """
         self.video_infer_textbox.delete("1.0", tk.END)
-        if metadata is None:
-            text = self.NO_DATA
-            self.video_infer_textbox.insert(tk.END, "", self.font_normal_tag)
-            self.video_infer_textbox.insert(tk.END, text, self.font_code_tag)
+        if not metadata or not indices:
+            text = self.NO_DATA_TEXT
         else:
             text = ""
             meta_lines = [
@@ -348,15 +359,17 @@ class VideoResultPlayerApp(object):
                     # reasonable padding to align columns, adjust if class names are too long to display
                     text += "{:<32s}".format(line)
                 text += "\n"
-            self.video_infer_textbox.insert(tk.END, "", self.font_normal_tag)
-            self.video_infer_textbox.insert(tk.END, text, self.font_code_tag)
+        self.video_infer_textbox.insert(tk.END, "", self.font_normal_tag)
+        self.video_infer_textbox.insert(tk.END, text, self.font_code_tag)
 
     def update_text_annot(self, metadata=None, indices=None):
         self.text_annot_textbox.delete("1.0", tk.END)
-        if metadata is None:
-            text = self.NO_DATA
-            self.text_annot_textbox.insert(tk.END, "", self.font_normal_tag)
-            self.text_annot_textbox.insert(tk.END, text, self.font_code_tag)
+        if not metadata or not indices:
+            text = self.NO_DATA_TEXT
+        elif indices[0] == self.NO_DATA_INDEX:
+            text = self.NO_DATA_TEXT
+        elif indices[0] == self.NO_MORE_INDEX:
+            text = self.NO_MORE_TEXT
         else:
             # only one dimension for this kind of annotation
             index = indices[0]
@@ -371,8 +384,8 @@ class VideoResultPlayerApp(object):
             for i, annot in enumerate(annotations):
                 text += "\n[{}]: {}\n".format(i, annot["sentence"])
                 text += "\n".join([fmt.format(*[item[f] for f in fields]) for item in annot["words"]])
-            self.text_annot_textbox.insert(tk.END, "", self.font_normal_tag)
-            self.text_annot_textbox.insert(tk.END, text, self.font_code_tag)
+        self.text_annot_textbox.insert(tk.END, "", self.font_normal_tag)
+        self.text_annot_textbox.insert(tk.END, text, self.font_code_tag)
 
     def update_metadata(self, seek=False):
         def update_meta(meta_container, meta_index, meta_updater):
@@ -386,7 +399,7 @@ class VideoResultPlayerApp(object):
             :return: index of updated metadata or already active one if time is still applicable for current metadata
             """
             # update only if metadata container entries are available
-            if meta_container:
+            if meta_container or meta_index == self.NO_DATA_INDEX:
                 # convert containers to 2D list regardless of original inputs
                 if not isinstance(meta_index, list):
                     meta_index = [meta_index]
@@ -399,27 +412,39 @@ class VideoResultPlayerApp(object):
                 for i, index in enumerate(meta_index):
                     current_index = 0 if seek else index
                     updated_index = current_index  # if nothing needs to change (current is still valid for timestamp)
-                    current_meta = meta_container[i][current_index]  # type: dict
                     index_total = len(meta_container[i])
                     if seek:
                         # search the earliest index that provides metadata within the new time
+                        must_update = True
+                        updated_index = self.NO_MORE_INDEX  # default if not found
                         for idx in range(index_total):
                             meta = meta_container[i][idx]
                             if meta[self.ts_key] >= self.frame_time:
                                 updated_index = idx
                                 break
-                    elif self.frame_time > current_meta[self.te_key]:
+                        else:
+                            # validate meta is within time range of last entry, or out of scope
+                            if meta_container[i][updated_index][self.te_key] >= self.frame_time:
+                                updated_index = len(meta_container[i]) - 1
+                    else:
+                        # if next index exceeds the list, entries are exhausted
+                        if current_index == self.NO_MORE_INDEX or current_index >= index_total:
+                            computed_indices.append(self.NO_MORE_INDEX)  # set for following iterations
+                            must_update = current_index == self.NO_MORE_INDEX  # updated last iteration
+                            continue
                         # otherwise bump to next one if timestamp of the current is passed
-                        updated_index = current_index + 1
+                        current_meta = meta_container[i][current_index]  # type: dict
+                        if self.frame_time > current_meta[self.te_key]:
+                            updated_index = current_index + 1
 
-                    # apply change of metadata, update all meta of each stack if any must be changed
-                    if index < index_total - 1 and current_index != updated_index or updated_index == 0:
+                    # apply change of metadata, update all stack of metadata type if any must be changed
+                    if current_index < index_total - 1 and current_index != updated_index:
                         must_update = True
                     computed_indices.append(updated_index)
                 if must_update:
                     meta_updater(meta_container, computed_indices)
                 return computed_indices
-            return None
+            return self.NO_DATA_INDEX
 
         self.video_desc_index = update_meta(self.video_desc_meta, self.video_desc_index, self.update_video_desc)
         self.video_infer_indices = update_meta(self.video_infer_meta, self.video_infer_indices, self.update_video_infer)
@@ -514,7 +539,7 @@ class VideoResultPlayerApp(object):
         Moves the video to the given frame index (if not the next one).
         Finally, updates the visual feedback of video progress with the slider.
         """
-        frame_index = int(frame_index)
+        frame_index = min(int(frame_index), self.frame_count - 1)
 
         # only execute an actual video frame seek() when it doesn't correspond to the next index, since it is already
         # fetched by the main loop using read()
@@ -522,10 +547,11 @@ class VideoResultPlayerApp(object):
         if frame_index not in [self.frame_index, self.frame_index - 1]:
             LOGGER.debug("Seek frame: %8s (fetching)", frame_index)
             self.frame_time = self.video.seek(frame_index)
+            self.update_metadata(seek=True)  # enforce fresh update since everything changed drastically
 
         # update slider position
-        self.frame_index = frame_index
         self.video_slider.set(frame_index)
+        self.frame_index = frame_index
 
     def snapshot(self):
         """
@@ -591,24 +617,33 @@ class VideoResultPlayerApp(object):
         could be mapped. Metadata text annotations are usually aligned with video-description, but this is not
         necessarily the case of video inferences. For this reason, additional entries are padded as follows:
 
-            [META-TYPE]                 ts                                               te
-            meta-video-desc     (VD)    |....... entry-1 ..... | ........ entry-2 ...... |
-            meta-text-annot     (TA)    |....... entry-1 ..... | ........ entry-2 ...... |
-            meta-video-infer    (VD[N]) |... entry-1 ...|... entry-2 ...|... entry-3 ....|
-            merged                      |..... M1 ......|. M2 .|.. M3 ..|...... M4 ......|
-                                        t0              t1     t2       t3               t4
+            [META-TYPE]                 ts                                                              te
 
-        Top-level start/end time correspond to first/last times found across every single metadata type/entry (ts/te).
+            meta-video-desc     (VD)    |........entry-1..........|.................entry-2.............|
+            meta-text-annot     (TA)    |........entry-1..........|..........entry-2........|...<none>..|
+            meta-video-infer    (VD[1]) |...entry-1...|.....entry-2....|....entry-3....|.....entry-4....|
+            meta-video-infer    (VD[N]) |........entry-1.....|.....entry-2....|....entry-3..|..entry-3..|
 
-        Then, for each merged entry, start/end time indicate the limits of each cut portion, respectively (t0/t1),
-        (t1/t2), (t3/t4) for the 4 generated entries above example.
+            merged                      |.....M1......|..M2..|.M3.|.M4.|..M5..|...M6...|.M7.|.....M8....|
+                                        t0            t1     t2   t3   t4     t5       t6   t7          t8
 
-        Under each entry, available VD, TA, VI[N] will have their **original** start/end time
-        (which will extend passed merged portions start/end times).
+        Top-level start/end time in ``details`` section correspond to first/last times found across every single
+        metadata type/entry portion (see above ts/te).
 
-        Whenever metadata of some type cannot be found within the given merged portion, ``None`` is placed instead.
-        This can happen for example when VD did not yet start, was over, or nothing happens for a long duration while
-        VI continues to predict continuously.
+        Then, for each merged entry inside ``merged`` section, start/end time indicate the limits of each cut portion
+        (ie: t0 to t8) for the 8 generated entries in above example. Metadata of different types will therefore
+        be replicated over each time range it overlaps with.
+
+        Under each merged entry, available VD, TA, VI[N] will have their **original** start/end time for reference
+        (these will extend pass merged portions start/end times, eg: 'entry-1' end time > t0 to t2 for the first entry).
+
+        Since VD time range can often appear much earlier than the moment when the represented actions are actually
+        displayed on video, start time of each sections are ignored to ensure that the first available entry are padded
+        until the next entry can be found with timestamps.
+
+        Whenever metadata of some type cannot be resolved within the given merged portion (when entries are exhausted),
+        the field is set to ``None``. This can happen for example when VD continues, but no corresponding TA was
+        provided (eg: common at the end of videos showing the end credits), while VI continues to predict continuously.
         """
         if not video_description_full_metadata and not video_description_time_metadata and \
                 not video_inference_full_metadata and not video_inference_time_metadata and \
@@ -618,8 +653,6 @@ class VideoResultPlayerApp(object):
 
         # define generic metadata details without the merged timestamped metadata
         metadata = {
-            self.ts_key: None,
-            self.te_key: None,
             "details": {self.vd_key: None, self.ta_key: None, self.vi_key: None},
             "merged": []
         }
@@ -719,9 +752,9 @@ class VideoResultPlayerApp(object):
 
             # update current metadata entry, empty if time is lower/greater than current portion
             # start times need to be computed after 'next_entry' call to find the start time of all meta portions
-            new_entry[self.vd_key] = None if not vd_entry or vd_entry[self.ts_key] < last_time else vd_entry
-            new_entry[self.ta_key] = None if not ta_entry or ta_entry[self.ts_key] < last_time else ta_entry
-            new_entry[self.vi_key] = [None if not v or v[self.ts_key] < last_time else v for v in vi_entries]
+            new_entry[self.vd_key] = vd_entry
+            new_entry[self.ta_key] = ta_entry
+            new_entry[self.vi_key] = vi_entries
 
             # apply current merged start/end times and add to list of merged metadata
             new_entry[self.ts_key] = last_time
@@ -729,10 +762,17 @@ class VideoResultPlayerApp(object):
             metadata["merged"].append(new_entry)
             last_time = end_time
 
-        metadata[self.ts_key] = first_time
-        metadata[self.te_key] = last_time
-
-        LOGGER.debug("Total amount of merged metadata entries: %s", len(metadata["merged"]))
+        # add extra metadata and save to file
+        total_merged = len(metadata["merged"])
+        metadata["details"].update({
+            self.ts_key: first_time,
+            self.te_key: last_time,
+            "total_merged": total_merged,
+            "total_{}".format(self.vd_key): len(video_description_time_metadata),
+            "total_{}".format(self.ta_key): len(text_annotation_time_metadata),
+            "total_{}".format(self.vi_key): [len(vi) for vi in video_inference_time_metadata],
+        })
+        LOGGER.debug("Total amount of merged metadata entries: %s", total_merged)
         LOGGER.info("Generating merged metadata file: [%s]", merged_path)
         with open(merged_path, "w") as meta_file:
             json.dump(metadata, meta_file, indent=4, ensure_ascii=False)
