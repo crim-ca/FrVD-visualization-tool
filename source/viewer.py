@@ -680,7 +680,7 @@ class VideoResultPlayerApp(object):
             ta_index = 0
         else:
             text_annotation_time_metadata = []
-        if video_description_time_metadata:
+        if video_inference_time_metadata:
             vi_indices = [0] * len(video_inference_time_metadata)
         else:
             video_inference_time_metadata = []
