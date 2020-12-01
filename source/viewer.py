@@ -710,7 +710,7 @@ class VideoResultPlayerApp(object):
         vi_totals = [len(vi_meta) for vi_meta in video_inference_time_metadata]
         while True:
             vd_txt = "(done)" if vd_index is None else "({}/{})".format(vd_index + 1, vd_total)
-            ta_txt = "(done)" if ta_index is None else "({}/{})".format(vd_index + 1, vd_total)
+            ta_txt = "(done)" if ta_index is None else "({}/{})".format(ta_index + 1, ta_total)
             vi_txt = ", ".join(["(done)" if vi_i is None else "({}/{})".format(vi_i + 1, vi_t)
                                 for vi_i, vi_t in zip(vi_indices, vi_totals)])
             LOGGER.debug("Merged: VI [%s] TA [%s] VI [%s]", vd_txt, ta_txt, vi_txt)
