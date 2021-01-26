@@ -2,14 +2,15 @@
 Minimalistic video player that allows visualization and easier interpretation of FAR-VVD results.
 """
 import argparse
-import json
 import logging
 import math
 import os
+import re
 import sys
 import time
 from datetime import datetime
-from typing import List, Optional
+from utils import read_metafile, write_metafile
+from typing import Dict, List, Optional
 
 import cv2 as cv
 import PIL.Image
@@ -64,8 +65,11 @@ class VideoResultPlayerApp(object):
     video_desc_index = None     # type: Optional[int]
     video_infer_meta = None
     video_infer_indices = None  # type: Optional[List[int]]
+    video_infer_multi = None    # type: Optional[List[bool]]
     text_annot_meta = None
     text_annot_index = None     # type: Optional[int]
+    mapping_label = None        # type: Optional[Dict[str, str]]
+    mapping_regex = None        # type: Optional[Dict[re.Pattern, str]]
     # handles to UI elements
     window = None
     video_viewer = None
@@ -99,8 +103,9 @@ class VideoResultPlayerApp(object):
     te_key = "end_ms"
     precision = 2
 
-    def __init__(self, video_file, video_description, video_results, text_annotations, merged_metadata=None,
-                 output=None, scale=1.0, queue_size=10, frame_drop_factor=4, frame_skip_factor=1):
+    def __init__(self, video_file, video_description, video_results, text_annotations,
+                 merged_metadata=None, mapping_file=None, output=None,
+                 scale=1.0, queue_size=10, frame_drop_factor=4, frame_skip_factor=1):
         if video_file is not None:
             self.video_source = os.path.abspath(video_file)
             if not os.path.isfile(video_file):
@@ -124,7 +129,7 @@ class VideoResultPlayerApp(object):
             self.setup_player()
             self.setup_window()
 
-        if not self.setup_metadata(video_description, video_results, text_annotations, merged_metadata):
+        if not self.setup_metadata(video_description, video_results, text_annotations, merged_metadata, mapping_file):
             return
         if video_file is None:
             LOGGER.info("No video to display")
@@ -214,8 +219,9 @@ class VideoResultPlayerApp(object):
                                          width=20,  padx=padding, pady=padding, command=self.snapshot)
         self.snapshot_button.pack(side=tk.LEFT, anchor=tk.NW)
 
-        self.video_desc_label = tk.Label(panel_video_desc, text="Video Description Metadata", font=self.font_header)
-        self.video_desc_label.pack(side=tk.TOP)
+        self.video_desc_label = tk.Label(panel_video_desc, text="Video Description Metadata",
+                                         font=self.font_header, justify=tk.LEFT, anchor=tk.W)
+        self.video_desc_label.pack(side=tk.TOP, fill=tk.X)
         video_desc_xy_scroll_box = tk.Frame(panel_video_desc, padx=0, pady=0)
         video_desc_xy_scroll_box.pack(fill=tk.BOTH, expand=True)
         self.video_desc_textbox = tk.Text(video_desc_xy_scroll_box, height=10, wrap=tk.WORD)
@@ -229,10 +235,11 @@ class VideoResultPlayerApp(object):
         video_desc_xy_scroll_box.grid_columnconfigure(0, weight=1)
         self.update_video_desc()
 
-        self.video_infer_label = tk.Label(panel_video_infer, text="Video Inference Metadata", font=self.font_header)
-        self.video_infer_label.pack(side=tk.TOP)
+        self.video_infer_label = tk.Label(panel_video_infer, text="Video Inference Metadata",
+                                          font=self.font_header, justify=tk.LEFT, anchor=tk.W)
+        self.video_infer_label.pack(side=tk.TOP, fill=tk.X)
         video_infer_xy_scroll_box = tk.Frame(panel_video_infer, padx=0, pady=0)
-        video_infer_xy_scroll_box.pack()
+        video_infer_xy_scroll_box.pack(fill=tk.BOTH, expand=True)
         self.video_infer_textbox = tk.Text(video_infer_xy_scroll_box, wrap=tk.NONE)
         self.video_infer_scrollX = tk.Scrollbar(video_infer_xy_scroll_box, orient=tk.HORIZONTAL,
                                                 command=self.video_infer_textbox.xview)
@@ -249,7 +256,8 @@ class VideoResultPlayerApp(object):
         video_infer_xy_scroll_box.grid_columnconfigure(0, weight=1)
         self.update_video_infer()
 
-        self.text_annot_label = tk.Label(panel_text_annot, text="Text Annotation Metadata", font=self.font_header)
+        self.text_annot_label = tk.Label(panel_text_annot, text="Text Annotation Metadata",
+                                         font=self.font_header, justify=tk.LEFT, anchor=tk.W)
         self.text_annot_label.pack(side=tk.TOP, fill=tk.X)
         text_annot_xy_scroll_box = tk.Frame(panel_text_annot, padx=0, pady=0)
         text_annot_xy_scroll_box.pack(fill=tk.BOTH, expand=True)
@@ -322,9 +330,14 @@ class VideoResultPlayerApp(object):
         self.video_desc_textbox.insert(tk.END, text, self.font_normal_tag)
         self.video_desc_textbox.insert(tk.END, "", self.font_code_tag)
 
-    def format_video_infer(self, number, index, metadata):
+    def format_video_infer(self, number, index, metadata, multi):
         """
         Format a single video inference metadata file into lines to be displayed.
+
+        :param number: index of the metadata list (in case of multiple provided).
+        :param index: index of the current entry within the corresponding metadata list.
+        :param metadata: metadata list corresponding to number where index entry can be retrieved.
+        :param multi: index of multi-predictions regions of entry if applicable (-1 if overall prediction on sequence).
         """
         template = "(file: {}, index: {})"
         if index == self.NO_MORE_INDEX:
@@ -332,11 +345,54 @@ class VideoResultPlayerApp(object):
         if index == self.NO_DATA_INDEX:
             return [template.format(number, "n/a"), self.NO_DATA_TEXT]
         meta = metadata[index]
+        info = ""
         entry = template.format(number, index)
         times = "(start: {:.2f}, end: {:.2f})".format(meta["start"], meta["end"])
         header = "[Score] [Classes]"
-        values = ["[{:.2f}] {}".format(s, c) for c, s in zip(meta["classes"], meta["scores"])]
-        return [entry, times, "", header] + values
+        if multi >= 0:
+            meta = meta["regions"][multi]
+            info = str(tuple(meta["bbox"]))
+        values = ["[{:.2f}] {}".format(s, c)
+                  for c, s in zip(meta["classes"], meta["scores"])]
+        return [entry, times, info, "", header] + values
+
+    @staticmethod
+    def flatten_video_meta(indices, metadata, regions):
+        """
+        Flattens 2D lists of predictions to 1D for rendering.
+
+        First dimension is along the number of provided video-inference files (length of :paramref:`indices`).
+        Second dimension are along the number of regions with predictions within each of those files.
+        If a file was defined with ``multi_predictions``, the number of (variable) predictions sets retrieved
+        per bounding box at the given index are flattened as if they were provided with individual files.
+
+            [file-1 predictions, file-2 multi-predictions-1, file-2 multi-predictions-2, file-3 predictions, ...]
+
+        Each of the above predictions represent a set of [Top-K] classifications scores/classes.
+
+        :param indices: list of indices of the current predictions set for each of the provided files
+        :param metadata: parsed metadata list of predictions for each of the provided files.
+        :param regions: boolean indicator for each file of whether it is formatted as single- or multi-predictions.
+        :return: tuple of flattened (file indices, index of predictions set, corresponding metadata, region index)
+        """
+        multi_indices = [len(metadata[number][indices[number]]["regions"]) if regions[number] else -1
+                         for number in range(len(metadata))]
+        flatten_metadata = []
+        flatten_indices = []
+        flatten_number = []
+        flatten_regions = []
+        for i, count in enumerate(multi_indices):
+            if count < 0:
+                flatten_metadata.append(metadata[i])
+                flatten_indices.append(indices[i])
+                flatten_number.append(i)
+                flatten_regions.append(-1)
+            else:
+                flatten_metadata.extend([metadata[i]] * count)
+                flatten_indices.extend([indices[i]] * count)
+                flatten_number.extend([i] * count)
+                flatten_regions.extend(list(range(count)))
+        return flatten_number, flatten_indices, flatten_metadata, flatten_regions
 
     def update_video_infer(self, metadata=None, indices=None):
         """
@@ -347,9 +403,11 @@ class VideoResultPlayerApp(object):
             text = self.NO_DATA_TEXT
         else:
             text = ""
+            range(len(metadata))
             meta_lines = [
-                self.format_video_infer(number, index, meta)
-                for number, (index, meta) in enumerate(zip(indices, metadata))
+                self.format_video_infer(number, index, meta, multi)
+                for (number, index, meta, multi)
+                in zip(*self.flatten_video_meta(indices, metadata, self.video_infer_multi))
             ]
             # display lines ordered from top-1 to lowest top-k, with possibility variable amounts for each
             max_lines = max([len(lines) for lines in meta_lines])
@@ -568,12 +626,15 @@ class VideoResultPlayerApp(object):
         cv.imwrite(frame_path, self.video_frame)
         LOGGER.info("Saved frame snapshot: [%s]", frame_path)
 
-    def setup_metadata(self, video_description, video_results, text_annotations, merged_metadata):
+    def setup_metadata(self, video_description, video_results, text_annotations, merged_metadata, mapping_file):
         """
         Parse available metadata files and prepare the first entry according to provided file references.
         """
         try:
             video_desc_full_meta = video_infer_full_meta = text_annot_full_meta = None
+            if mapping_file:
+                LOGGER.info("Parsing class mapping file [%s]...", mapping_file)
+                self.setup_mapper(mapping_file)
             if video_description and os.path.isfile(video_description):
                 LOGGER.info("Parsing video description metadata [%s]...", video_description)
                 self.video_desc_meta, video_desc_full_meta = self.parse_video_description_metadata(video_description)
@@ -581,41 +642,81 @@ class VideoResultPlayerApp(object):
             if video_results and isinstance(video_results, list):
                 video_infer_full_meta = []
                 for result in video_results:
-                    if os.path.isfile(result):
-                        LOGGER.info("Parsing video inference metadata [%s]...", video_results)
-                    meta, full_meta = self.parse_video_inference_metadata(result)
+                    LOGGER.info("Parsing video inference metadata [%s]...", result)
+                    meta, full_meta, multi = self.parse_video_inference_metadata(result)
                     video_infer_full_meta.append(full_meta)
                     if not self.video_infer_meta:
                         self.video_infer_meta = []
                         self.video_infer_indices = []
+                        self.video_infer_multi = []
                     self.video_infer_meta.append(meta)
                     self.video_infer_indices.append(0)
+                    self.video_infer_multi.append(multi)
             if text_annotations and os.path.isfile(text_annotations):
                 LOGGER.info("Parsing text inference metadata [%s]...", text_annotations)
-                self.text_annot_meta, text_annot_full_meta = self.parse_text_annotations_metadata(text_annotations)
+                meta, full_meta = self.parse_text_annotations_metadata(text_annotations)
+                self.text_annot_meta, text_annot_full_meta = meta, full_meta
                 self.text_annot_index = 0
             if merged_metadata:
                 self.merge_metadata(video_desc_full_meta, video_infer_full_meta, text_annot_full_meta,
-                                    self.video_desc_meta, self.video_infer_meta, self.text_annot_meta, merged_metadata)
+                                    self.video_desc_meta, self.video_infer_meta, self.text_annot_meta,
+                                    merged_metadata, self.mapping_label)
         except Exception as exc:
             self.error = True
             LOGGER.error("Invalid formats. One or more metadata file could not be parsed.", exc_info=exc)
             return False
         return True
 
+    def setup_mapper(self, path):
+        """
+        Setup label mapping with regex support.
+
+        .. code-block:: YAML
+
+            # replaces all labels with literal key match with the corresponding value
+            "carry/hold (an object)": "carry/hold"
+
+            # replaces all labels that have '<words> (an object)' by '<words> <something>'
+            "(.+) \\(an object\\)": "\\1 <something>"
+
+        .. seealso::
+            - ``label_mapping.yml`` for more details and examples.
+
+        """
+        self.mapping_label = read_metafile(path)
+        if self.mapping_label:
+            LOGGER.info("\n  ".join(["Will use label mapping:"] +
+                                    ["{}: {}".format(k, v) for k, v in self.mapping_label.items()]))
+            self.mapping_regex = {}
+            regexes = [(key, val) for key, val in self.mapping_label.items()
+                       if "\\" in key or "\\" in val or any(p in key for p in [".*", ".+", ".?"])]
+            for key, val in regexes:
+                key = ("^" if not key.startswith("^") else "") + key + ("$" if not key.endswith("$") else "")
+                self.mapping_regex[re.compile(key)] = val  # replace must be string for literal replace (no group)
+
+    def map_label(self, label):
+        """
+        Replace label using provided mapping, with literal string match followed by regex substitution if applicable.
+        """
+        if not self.mapping_label:
+            return label
+        mapped = self.mapping_label.get(label)
+        if mapped:
+            return mapped
+        for search, replace in self.mapping_regex.items():
+            mapped = re.sub(search, replace, label)
+            if mapped != label:
+                return mapped
+        return label
+
     def merge_metadata(self,
                        video_description_full_metadata, video_inference_full_metadata, text_annotation_full_metadata,
                        video_description_time_metadata, video_inference_time_metadata, text_annotation_time_metadata,
-                       merged_path):
+                       merged_path, mapping):
         """
         Merges all provided metadata variations into a common file.
 
-        Section ``details`` provide general metadata provenance information from the corresponding metadata types.
-        Entries marked as ``None`` mean that no corresponding metadata file of that type was provided as input.
-
-        Section ``merged`` provides the combined/extended timestamp entries where concordance between metadata types
-        could be mapped. Metadata text annotations are usually aligned with video-description, but this is not
-        necessarily the case of video inferences. For this reason, additional entries are padded as follows:
+        .. example::
 
             [META-TYPE]                 ts                                                              te
 
@@ -627,23 +728,9 @@ class VideoResultPlayerApp(object):
             merged                      |.....M1......|..M2..|.M3.|.M4.|..M5..|...M6...|.M7.|.....M8....|
                                         t0            t1     t2   t3   t4     t5       t6   t7          t8
 
-        Top-level start/end time in ``details`` section correspond to first/last times found across every single
-        metadata type/entry portion (see above ts/te).
+        .. seealso::
+            `docs/usage.md` for full details.
 
-        Then, for each merged entry inside ``merged`` section, start/end time indicate the limits of each cut portion
-        (ie: t0 to t8) for the 8 generated entries in above example. Metadata of different types will therefore
-        be replicated over each time range it overlaps with.
-
-        Under each merged entry, available VD, TA, VI[N] will have their **original** start/end time for reference
-        (these will extend pass merged portions start/end times, eg: 'entry-1' end time > t0 to t2 for the first entry).
-
-        Since VD time range can often appear much earlier than the moment when the represented actions are actually
-        displayed on video, start time of each sections are ignored to ensure that the first available entry are padded
-        until the next entry can be found with timestamps.
-
-        Whenever metadata of some type cannot be resolved within the given merged portion (when entries are exhausted),
-        the field is set to ``None``. This can happen for example when VD continues, but no corresponding TA was
-        provided (eg: common at the end of videos showing the end credits), while VI continues to predict continuously.
         """
         if not video_description_full_metadata and not video_description_time_metadata and \
                 not video_inference_full_metadata and not video_inference_time_metadata and \
@@ -654,7 +741,8 @@ class VideoResultPlayerApp(object):
         # define generic metadata details without the merged timestamped metadata
         metadata = {
             "details": {self.vd_key: None, self.ta_key: None, self.vi_key: None},
-            "merged": []
+            "merged": [],
+            "mapping": mapping,
         }
         if video_description_full_metadata:
             video_description_full_metadata.pop("standard_vd_metadata", None)
@@ -774,13 +862,11 @@ class VideoResultPlayerApp(object):
         })
         LOGGER.debug("Total amount of merged metadata entries: %s", total_merged)
         LOGGER.info("Generating merged metadata file: [%s]", merged_path)
-        with open(merged_path, "w") as meta_file:
-            json.dump(metadata, meta_file, indent=4, ensure_ascii=False)
+        write_metafile(metadata, merged_path)
 
     def parse_video_description_metadata(self, metadata_path):
         try:
-            with open(metadata_path) as meta_file:
-                metadata = json.load(meta_file)
+            metadata = read_metafile(metadata_path)
             meta = metadata.get("metadata_files", {})
             title = meta.get("serie_name") or meta.get("film_export_subpath")
             episode = meta.get("serie_episode_number", "")
@@ -814,23 +900,26 @@ class VideoResultPlayerApp(object):
 
     def parse_video_inference_metadata(self, metadata_path):
         try:
-            with open(metadata_path) as meta_file:
-                metadata = json.load(meta_file)
+            metadata = read_metafile(metadata_path)
             # ensure ordered by time
             predictions = list(sorted(metadata["predictions"], key=lambda p: p["start"]))
+            multi_preds = metadata.get("multi_predictions", False)
             # convert times to ms for same base comparisons
             for pred in predictions:
                 pred[self.ts_key] = round(pred["start"] * 1000, self.precision)
                 pred[self.te_key] = round(pred["end"] * 1000, self.precision)
-            return predictions, metadata
+                for region in pred["regions"] if multi_preds else [pred]:
+                    labels = region["classes"]
+                    for i, _ in enumerate(region["classes"]):
+                        labels[i] = self.map_label(labels[i])
+            return predictions, metadata, multi_preds
         except Exception as exc:
             LOGGER.error("Could not parse video inference metadata file: [%s]", metadata_path, exc_info=exc)
         return None
 
     def parse_text_annotations_metadata(self, metadata_path):
         try:
-            with open(metadata_path) as meta_file:
-                metadata = json.load(meta_file)
+            metadata = read_metafile(metadata_path)
             annotations = metadata["data"]
             for annot in annotations:
                 # convert TS: [start,end] -> (ts, te) in milliseconds
@@ -883,19 +972,23 @@ def make_parser():
                            help="Disable video. Employ only metadata parsing. "
                                 "Must be combined with merged metadata output.")
     main_args.add_argument("--video-description", "--vd", dest="video_description",
-                           help="JSON metadata file with original video-description annotations.")
+                           help="JSON/YAML metadata file with original video-description annotations.")
     main_args.add_argument("--video-inference", "--vi", nargs="*", dest="video_results",
-                           help="JSON metadata file(s) with video action recognition inference results. "
+                           help="JSON/YAML metadata file(s) with video action recognition inference results. "
                                 "If multiple files are provided, they will be simultaneously displayed side-by-side.")
     main_args.add_argument("--text-annotation", "--ta", dest="text_annotations",
-                           help="JSON metadata file with text subjects and verbs annotations.")
-    main_args.add_argument("--merged", "-m", dest="merged_metadata",
-                           help="Output path of merged metadata JSON file from all other metadata files with realigned "
-                                "timestamps of corresponding sections.")
+                           help="JSON/YAML metadata file with text subjects and verbs annotations.")
     util_opts = ap.add_argument_group(title="Utility Options",
                                       description="Options that configure extra functionalities.")
     util_opts.add_argument("--output", "-o", default="/tmp/video-result-viewer",
                            help="Output location of frame snapshots (default: [%(default)s]).")
+    util_opts.add_argument("--merged", "-m", dest="merged_metadata",
+                           help="Output path of merged metadata JSON/YAML file from all other metadata files "
+                                "with realigned timestamps of corresponding sections.")
+    util_opts.add_argument("--mapping", "--map", "-M", dest="mapping_file",
+                           help="JSON/YAML file with class name mapping. When provided, class names within "
+                                "text annotations and video inference metadata that correspond to a given key will "
+                                "be replaced for rendering and merged output by the respective value.")
     video_opts = ap.add_argument_group(title="Video Options",
                                        description="Options that configure video processing.")
     video_opts.add_argument("--scale", "-s", type=float, default=VideoResultPlayerApp.video_scale,

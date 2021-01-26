@@ -1,0 +1,43 @@
+# Below mapping is intended for use with:
+#   https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer
+#
+# Application:
+#   source/viewer.py
+#
+# It facilitates mapping of labels from *any* dataset classes to the desired value for analysis.
+# The merged results (VD, text, vision) that can be generated with the viewer script will also substitute
+# those mapped labels.
+#
+# Mappings can also be employed to *combine* different classes into one, using same substitution result.
+# For example:
+#
+#   label-1: label-group
+#   label-2: label-group
+#
+# Mapping also support group regexes to facilitate substitution of multiple similar labels as needed.
+# Regex substitution will occur after literal string substitution of no match was previously found.
+# When using regexes, double escape '\\' must be used to obtain plain '\' after loading configuration.
+#
+
+
+## === AVA classes mapping ===
+
+# --- literal matches ---
+
+# simplify some labels
+"bend/bow (at the waist)": "bend/bow"
+"dress/put on clothing": "put clothes"
+"text on/look at a cellphone": "use cellphone"
+# literal replace to also add generic <something> in specific cases
+"give/serve (an object) to (a person)": "give/serve <something> to <something>"
+"take (an object) from (a person)": "take <something> from <something>"
+"talk to (e.g., self, a person, a group)": "talk to <something>"
+
+# --- regexes substitution ---
+
+# following regexes match multiple labels formed similarly
+# remove examples and employ generic <something>
+"(.+) \\(e\\.g\\..*\\)": "\\1"
+"(.+) \\(a person\\)": "\\1 <something>"
+"(.+) \\(an object\\)": "\\1 <something>"
+
