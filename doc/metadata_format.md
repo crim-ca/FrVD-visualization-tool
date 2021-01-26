@@ -97,7 +97,7 @@ metadata files.
             "name": "<name>",
             "start": <seconds-time-start>,
             "end": <seconds-time-end>,
-            "part": "<frame>/<sample_count>",
+            "part": "<segment>/<sample_count>",
             "classes": [ "a", "b", "c", "d", "e" ],
             "scores": [ 0.60, 0.20, 0.10, 0.03, 0.02 ]
         }
