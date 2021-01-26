@@ -2,6 +2,7 @@
 Minimalistic video player that allows visualization and easier interpretation of FAR-VVD results.
 """
 import argparse
+import itertools
 import logging
 import math
 import os
@@ -9,7 +10,7 @@ import re
 import sys
 import time
 from datetime import datetime
-from utils import read_metafile, write_metafile
+from utils import ToolTip, draw_bbox, read_metafile, write_metafile
 from typing import Dict, List, Optional
 
 import cv2 as cv
@@ -86,6 +87,9 @@ class VideoResultPlayerApp(object):
     text_annot_scrollY = None
     text_annot_textbox = None
     snapshot_button = None
+    checkbox_regions = None
+    display_regions = None
+    display_colors = None
     play_button = None
     play_state = True
     play_label = None
@@ -128,6 +132,7 @@ class VideoResultPlayerApp(object):
                 self.frame_skip_factor = frame_skip_factor
             self.setup_player()
             self.setup_window()
+            self.setup_colors()
 
         if not self.setup_metadata(video_description, video_results, text_annotations, merged_metadata, mapping_file):
             return
@@ -147,13 +152,14 @@ class VideoResultPlayerApp(object):
         self.video = VideoCaptureThread(self.video_source, queue_size=self.frame_queue).start()
         self.frame_index = 0
         self.frame_time = 0.0
-        self.frame_fps = int(self.video.get(cv.CAP_PROP_FPS))
-        self.frame_delta = 1. / float(self.frame_fps) * 1000.
+        real_fps = self.video.get(cv.CAP_PROP_FPS)
+        self.frame_fps = round(real_fps)
+        self.frame_delta = 1. / float(real_fps) * 1000.
         self.frame_count = int(self.video.get(cv.CAP_PROP_FRAME_COUNT))
         self.video_duration = self.frame_delta * self.frame_count
-        self.video_width = int(self.video.get(cv.CAP_PROP_FRAME_WIDTH))
-        self.video_height = int(self.video.get(cv.CAP_PROP_FRAME_HEIGHT))
-        expected_width = int(self.video_width * self.video_scale)
+        self.video_width = round(self.video.get(cv.CAP_PROP_FRAME_WIDTH))
+        self.video_height = round(self.video.get(cv.CAP_PROP_FRAME_HEIGHT))
+        expected_width = round(self.video_width * self.video_scale)
         if expected_width < 480:
             new_scale = 480. / float(self.video_width)
             LOGGER.warning("Readjusting video scale [%.3f] to [%.3f] to ensure minimal width [480px].",
@@ -162,8 +168,8 @@ class VideoResultPlayerApp(object):
 
     def setup_window(self):
         LOGGER.info("Creating window...")
-        display_width = int(self.video_width * self.video_scale)
-        display_height = int(self.video_height * self.video_scale)
+        display_width = round(self.video_width * self.video_scale)
+        display_height = round(self.video_height * self.video_scale)
 
         self.window = tk.Tk()
         self.window.title("Video Result Viewer: {}".format(self.video_title))
@@ -199,7 +205,7 @@ class VideoResultPlayerApp(object):
         self.video_viewer = tk.Canvas(panel_video_viewer, width=display_width, height=display_height)
         self.video_viewer.pack(anchor=tk.NW, fill=tk.BOTH, expand=True)
         # adjust number of labels displayed on slider with somewhat dynamic amount based on video display scaling
-        slider_interval = self.frame_count // int(10 * self.video_scale)
+        slider_interval = self.frame_count // round(10 * self.video_scale)
         slider_elements = self.frame_count // slider_interval
         slider_interval = self.frame_count // (slider_elements if slider_elements % 2 else slider_elements + 1)
         self.video_slider = tk.Scale(panel_video_viewer, from_=0, to=self.frame_count - 1, length=display_width,
@@ -218,6 +224,19 @@ class VideoResultPlayerApp(object):
         self.snapshot_button = tk.Button(panel_video_viewer, text="Snapshot",
                                          width=20,  padx=padding, pady=padding, command=self.snapshot)
         self.snapshot_button.pack(side=tk.LEFT, anchor=tk.NW)
+
+        self.checkbox_regions = tk.Frame(panel_video_viewer)
+        self.display_regions = tk.IntVar(value=1)
+        checkbox_regions_label = tk.Label(self.checkbox_regions, text="Display regions")
+        checkbox_regions_label.grid(row=0, column=0)
+        checkbox_regions_check = tk.Checkbutton(self.checkbox_regions, variable=self.display_regions)
+        checkbox_regions_check.grid(row=0, column=1)
+        ToolTip(self.checkbox_regions, justify=tk.LEFT,
+                text="When displayed, dashed regions represent upcoming/passed central key frames.\n"
+                     "Filled region box indicate current time is close to center key frame of video segment metadata.\n"
+                     "This is because regions are defined only for the central key frame of each segment, rather than\n"
+                     "following objects over each frame.")
+        self.checkbox_regions.pack(side=tk.RIGHT, anchor=tk.SE)
 
         self.video_desc_label = tk.Label(panel_video_desc, text="Video Description Metadata",
                                          font=self.font_header, justify=tk.LEFT, anchor=tk.W)
@@ -294,7 +313,7 @@ class VideoResultPlayerApp(object):
             index = self.frame_count - 1
         else:
             ratio = float(self.frame_count) / float(coord_max[0] - coord_min[0])
-            index = int((event.x - coord_min[0]) * ratio)
+            index = round((event.x - coord_min[0]) * ratio)
             while index % self.frame_skip_factor:
                 index += 1
 
@@ -508,6 +527,69 @@ class VideoResultPlayerApp(object):
         self.video_infer_indices = update_meta(self.video_infer_meta, self.video_infer_indices, self.update_video_infer)
         self.text_annot_index = update_meta(self.text_annot_meta, self.text_annot_index, self.update_text_annot)
 
+    def display_frame_info(self, frame, current_fps, average_fps):
+        """
+        Displays basic information on the frame.
+        """
+        text_offset = (10, 25)
+        text_delta = 40
+        font_scale = 0.5
+        font_color = (209, 80, 0, 255)
+        font_stroke = 1
+        text0 = "Title: {}".format(self.video_title)
+        text1 = "Original FPS: {}, Process FPS: {:0.2f} ({:0.2f})".format(self.frame_fps, current_fps, average_fps)
+        cur_sec = self.frame_time / 1000.
+        tot_sec = self.video_duration / 1000.
+        cur_hms = time.strftime("%H:%M:%S", time.gmtime(cur_sec))
+        tot_hms = time.strftime("%H:%M:%S", time.gmtime(tot_sec))
+        text2 = "Time: {:0>.2f}/{:0.2f} ({}/{}) Frame: {}".format(cur_sec, tot_sec, cur_hms, tot_hms, self.frame_index)
+        for text_row, text in [(0, text0), (-2, text1), (-1, text2)]:
+            y_offset = round(text_delta * font_scale) * text_row
+            if text_row < 0:
+                y_offset = self.video_height + (y_offset - text_offset[1])
+            text_pos = (text_offset[0], text_offset[1] + y_offset)
+            cv.putText(frame, text, text_pos, cv.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_stroke)
+
+    def display_frame_regions(self, frame):
+        """
+        Displays bounding boxes whenever available from video inference metadata.
+
+        Because regions defined by bounding boxes only refer to the central key frame ``tc`` within video segments where
+        the associated action predictions are provided, it is possible that detection regions are not overlapping the
+        actual visual person/object over the whole video segment. To indicate when the bounding box position overlaps
+        the central key frame region, use a solid line rectangle when inside of a somewhat close interval ``dt`` from
+        central ``tc``. For times outside that approximate interval, use a dashed line as potential but possibly
+        erroneous person/object within the region. For a video segment spanning from ``ts`` to ``te``, the boxes will
+        be rendered as dashed (``--``) or filled (``==``) as follows:
+
+            ts        tc-dt    tc   tc+dt         te
+            |-----------|======|======|-----------|
+
+        """
+        for i, video_meta_index in enumerate(self.video_infer_indices):
+            if self.video_infer_multi[i]:
+                meta = self.video_infer_meta[i][video_meta_index]
+                ts = meta["start_ms"]
+                te = meta["end_ms"]
+                # skip if region time is not yet reached or is passed
+                if self.frame_time < ts or te < self.frame_time:
+                    continue
+                dt = 1000  # ms
+                tc = ts + (te - ts) / 2
+                ts_dt = tc - dt
+                te_dt = tc + dt
+                dash = 5  # dash spacing if not within ±dt, otherwise filled
+                if ts_dt <= self.frame_time <= te_dt:
+                    dash = None
+                for r, region in enumerate(meta["regions"]):
+                    tl = (region["bbox"][0], region["bbox"][1])
+                    br = (region["bbox"][2], region["bbox"][3])
+                    color = self.display_colors[r % len(self.display_colors)]
+                    label = "file: {}, bbox: {}".format(i, r)
+                    draw_bbox(frame, tl, br, label, color,
+                              box_thickness=1, box_dash_gap=dash, box_contour=False,
+                              font_thickness=1, font_scale=0.5, font_contour=False)
+
     def update_video(self):
         """
         Periodic update of video frame. Self-calling.
@@ -551,35 +633,19 @@ class VideoResultPlayerApp(object):
         self.call_cumul_count += 1
         call_avg_fps = self.call_cumul_count / self.call_cumul_value
 
+        if self.display_regions.get():
+            self.display_frame_regions(frame)   # must call before any resize to employ with original bbox dimensions
+
         frame_dims = (self.video_width, self.video_height)
         if self.video_scale != 1:
-            frame_dims = (int(self.video_width * self.video_scale), int(self.video_height * self.video_scale))
+            frame_dims = (round(self.video_width * self.video_scale), round(self.video_height * self.video_scale))
             frame = cv.resize(frame, frame_dims, interpolation=cv.INTER_NEAREST)
 
         LOGGER.debug("Show Frame: %8s, Last: %8.2f, Time: %8.2f, Real Delta: %6.2fms, "
                      "Target Delta: %6.2fms, Call Delta: %6.2fms, Real FPS: %6.2f (%.2f) WxH: %s",
                      self.frame_index, self.last_time, self.frame_time, wait_time_delta,
                      self.frame_delta, call_msec_delta, call_fps, call_avg_fps, frame_dims)
-
-        # display basic information
-        text_offset = (10, 25)
-        text_delta = 40
-        font_scale = 0.5
-        font_color = (209, 80, 0, 255)
-        font_stroke = 1
-        text0 = "Title: {}".format(self.video_title)
-        text1 = "Original FPS: {}, Process FPS: {:0.2f} ({:0.2f})".format(self.frame_fps, call_fps, call_avg_fps)
-        cur_sec = self.frame_time / 1000.
-        tot_sec = self.video_duration / 1000.
-        cur_hms = time.strftime("%H:%M:%S", time.gmtime(cur_sec))
-        tot_hms = time.strftime("%H:%M:%S", time.gmtime(tot_sec))
-        text2 = "Time: {:0>.2f}/{:0.2f} ({}/{}) Frame: {}".format(cur_sec, tot_sec, cur_hms, tot_hms, self.frame_index)
-        for text_row, text in [(0, text0), (-2, text1), (-1, text2)]:
-            y_offset = int(text_delta * font_scale) * text_row
-            if text_row < 0:
-                y_offset = self.video_height + (y_offset - text_offset[1])
-            text_pos = (text_offset[0], text_offset[1] + y_offset)
-            cv.putText(frame, text, text_pos, cv.FONT_HERSHEY_SIMPLEX, font_scale, font_color, font_stroke)
+        self.display_frame_info(frame, call_fps, call_avg_fps)
 
         # note: 'self.frame' is important as without instance reference, it gets garbage collected and is not displayed
         self.video_frame = frame  # in case of snapshot
@@ -625,6 +691,20 @@ class VideoResultPlayerApp(object):
         frame_path = os.path.join(self.frame_output, frame_name)
         cv.imwrite(frame_path, self.video_frame)
         LOGGER.info("Saved frame snapshot: [%s]", frame_path)
+
+    def setup_colors(self):
+        """
+        Generate list of colors for bounding boxes display.
+        """
+        # start with most distinct color variations using 0/255 RGB values
+        self.display_colors = set(itertools.product([0, 255], repeat=3))
+        # then add the intermediate colors to have more options
+        half_colors = set(itertools.product([0, 128, 255], repeat=3)) - self.display_colors
+        # remove black/white which are often hard to see against image
+        self.display_colors.remove((0, 0, 0))
+        self.display_colors.remove((255, 255, 255))
+        # total 25 colors, more than enough for most use cases
+        self.display_colors = list(self.display_colors) + list(half_colors)
 
     def setup_metadata(self, video_description, video_results, text_annotations, merged_metadata, mapping_file):
         """

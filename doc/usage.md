@@ -138,7 +138,7 @@ The format is summarized below:
                 - "Thh:mm:ss.fff"   # raw end timestamp
               # In this case, timestamps of TA entry-1 just so happenned to be aligned with VD entry-1
               # In the case of VD entry-2, two 'merged' separate entries would exist, one for TA entry-2 and 
-              # another for entry-3. Both would have the same VD spaning between t3 and t8. Those entries would 
+              # another for entry-3. Both would have the same VD spanning between t3 and t8. Those entries would 
               # respectively have t3/t7 and t7/t8 as start/end times for the TA sub-section. 
               start_ms: <t0>
               end_ms: <t3>
