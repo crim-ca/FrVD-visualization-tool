@@ -9,8 +9,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime
-from utils import ToolTip, draw_bbox, read_metafile, write_metafile
+from utils import ToolTip, draw_bbox, parse_timestamp, read_metafile, write_metafile
 from typing import Dict, List, Optional
 
 import cv2 as cv
@@ -1003,8 +1002,8 @@ class VideoResultPlayerApp(object):
             annotations = metadata["data"]
             for annot in annotations:
                 # convert TS: [start,end] -> (ts, te) in milliseconds
-                ts_s = datetime.strptime(annot["TS"][0], "T%H:%M:%S.%f")
-                ts_e = datetime.strptime(annot["TS"][1], "T%H:%M:%S.%f")
+                ts_s = parse_timestamp(annot["TS"][0])
+                ts_e = parse_timestamp(annot["TS"][1])
                 sec_s = float("{}.{}".format((ts_s.hour * 3600 + ts_s.minute * 60 + ts_s.second), ts_s.microsecond))
                 sec_e = float("{}.{}".format((ts_e.hour * 3600 + ts_e.minute * 60 + ts_e.second), ts_e.microsecond))
                 annot[self.ts_key] = round(sec_s * 1000., self.precision)

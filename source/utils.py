@@ -2,6 +2,7 @@ import cv2 as cv
 import json
 import tkinter as tk
 import yaml
+from datetime import datetime
 
 
 def read_metafile(path):
@@ -16,6 +17,17 @@ def write_metafile(metadata, path):
             json.dump(metadata, meta_file, indent=4, ensure_ascii=False)
         else:
             yaml.safe_dump(metadata, meta_file)
+
+
+def parse_timestamp(timestamp):
+    # type: (str) -> datetime
+    """
+    Parses a timestamp with flexible formats.
+    """
+    try:
+        return datetime.strptime(timestamp, "T%H:%M:%S.%f")
+    except ValueError:
+        return datetime.strptime(timestamp, "T%H:%M:%S")
 
 
 def draw_bbox(image, tl, br, text, color,
