@@ -19,6 +19,15 @@ def write_metafile(metadata, path):
             yaml.safe_dump(metadata, meta_file)
 
 
+def split_sentences(text):
+    punctuations = [".", "!", "?"]
+    for stop in punctuations:
+        text = text.replace("{} ".format(stop), "{}<STOP>".format(stop))
+    sentences = text.split("<STOP>")
+    sentences = [s + "." if s[-1] not in punctuations else s for s in sentences if s]
+    return sentences
+
+
 def parse_timestamp(timestamp):
     # type: (str) -> datetime
     """

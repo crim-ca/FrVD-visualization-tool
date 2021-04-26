@@ -2,14 +2,16 @@
 Minimalistic video player that allows visualization and easier interpretation of FAR-VVD results.
 """
 import argparse
+import difflib
 import itertools
+import json
 import logging
 import math
 import os
 import re
 import sys
 import time
-from utils import ToolTip, draw_bbox, parse_timestamp, read_metafile, write_metafile
+from utils import ToolTip, draw_bbox, parse_timestamp, read_metafile, split_sentences, write_metafile
 from typing import Dict, List, Optional
 
 import cv2 as cv
@@ -1011,33 +1013,71 @@ class VideoResultPlayerApp(object):
                 annot["start"] = sec_s
                 annot["end"] = sec_e
                 # extend 2D list into sentences/words metadata and drop redundant VD
-                vd = annot.pop("vd", "")
-                sentences = [s + "." if not s.endswith(".") else s for s in vd.split(". ")]
+                vd_sentence = annot.pop("vd", "")
                 annot_list = list(annot["annotations"])  # ensure copy to avoid edit error while iterating
-                # note:
-                #  Original annotations sometime have errors due to capital letters incorrectly interpreted
-                #  as beginning of new sentence.
-                #  Sometimes, they are instead missing some annotations against the number of sentences.
-                #  Patch them as best as possible.
-                while len(sentences) != len(annot_list):
-                    if len(sentences) > len(annot_list):
-                        # pad extra empty annotations where no lemme can be matched within the current sentence
-                        # if matched, move to next to find the best index at which to insert empty annotations
-                        i = 0
-                        for i, s in enumerate(sentences):
-                            if i >= len(annot_list):
-                                break
-                            if not any([a["lemme"].replace("_", " ") in s for a in annot_list[i]]):
-                                break
-                        annot_list.insert(i, [])
-                    else:
-                        # merge over abundant annotations
-                        annot_list[0].extend(annot_list.pop(1))
+
+                # old format only provides annotations directly (the 'words' with POS, lemme, type)
+                # uses a 2D list of annotations for individually annotated sentences, but they are not provided:
+                #   {"annotations": [[ { "POS": "", "lemme": "", "type": "" }, { ... } ], ... ]
+
+                # new format contains the annotated sentence and corresponding annotations within this definition
+                # they also employ the target format directly, except they use "annot_sentence" instead of "words"
+                #   {"annotations": [{ "sentence": "", "annot_sentence": [{ "POS": "", "lemme": "", "type": "" }] }] }
+
+                if not annot_list or all("annot_sentence" in a and not a["annot_sentence"] for a in annot_list):
+                    annot["annotations"] = []  # skip empty annotations
+                    continue
+                elif all("sentence" in a and "annot_sentence" in a for a in annot_list):
+                    # show mismatches between new format sentences and how we would normally parse them from old format
+                    # don't update anything though, we employ provided sentences directly
+                    self.parse_diff_sentences(vd_sentence, annot_list)
+                    sentences = [annot_sentence["sentence"] for annot_sentence in annot_list]
+                    annot_list = [annot_sentence["annot_sentence"] for annot_sentence in annot_list]
+                else:
+                    sentences, annot_list = self.parse_split_sentences(vd_sentence, annot_list)
                 annot["annotations"] = [{"sentence": s, "words": a} for s, a in zip(sentences, annot_list)]
             return list(sorted(annotations, key=lambda _a: _a[self.ts_key])), metadata
         except Exception as exc:
             LOGGER.error("Could not parse text inference metadata file: [%s]", metadata_path, exc_info=exc)
         return None
+
+    @staticmethod
+    def parse_diff_sentences(vd_sentence, annotation_list):
+        if not LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        try:
+            sentences_annot = [annot["sentence"] for annot in annotation_list]
+            sentences_parsed = split_sentences(vd_sentence)
+            if sentences_parsed != sentences_annot:
+                diff = difflib.context_diff(sentences_parsed, sentences_annot,
+                                            fromfile="VD Split Sentences", tofile="Annotated Sentences")
+                LOGGER.debug("Found mismatch sentences:\n  %s", "\n  ".join(diff))
+        except Exception:  # noqa
+            pass  # ignore failure as this parsing is only to attempt informing about found differences, not critical
+
+    @staticmethod
+    def parse_split_sentences(vd_sentence, annotation_list):
+        sentences = split_sentences(vd_sentence)
+        # note:
+        #  Original annotations sometime have errors due to capital letters incorrectly interpreted
+        #  as beginning of new sentence.
+        #  Sometimes, they are instead missing some annotations against the number of sentences.
+        #  Patch them as best as possible.
+        while len(sentences) != len(annotation_list):
+            if len(sentences) > len(annotation_list):
+                # pad extra empty annotations where no lemme can be matched within the current sentence
+                # if matched, move to next to find the best index at which to insert empty annotations
+                i = 0
+                for i, s in enumerate(sentences):
+                    if i >= len(annotation_list):
+                        break
+                    if not any([a["lemme"].replace("_", " ") in s for a in annotation_list[i]]):
+                        break
+                annotation_list.insert(i, [])
+            else:
+                # merge over abundant annotations
+                annotation_list[0].extend(annotation_list.pop(1))
+        return sentences, annotation_list
 
 
 def make_parser():
