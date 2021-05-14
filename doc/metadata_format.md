@@ -118,12 +118,12 @@ See also:
 
 The ``vd`` fields are not employed (original VD from its ``metadata.json`` is employed).
 
-The ``annotations`` can have any amount of 2D-list, where first dimension is the sentence and the second represent the
-annotated lemmes within each sentence.
+**NOTE** <br>
+Different formats are presented to keep track of their evolution over time. <br> 
+The [latest](#v3---precise-annotations) one should be used. 
 
-Timestamps of a given annotation are mapped with start/end time and converted appropriately to match them against 
-equivalent timestamps of other metadata files.
- 
+
+#### V1 - Original Annotations
 
 ``` json
 {
@@ -149,3 +149,17 @@ equivalent timestamps of other metadata files.
 }
 ```
 
+
+The ``annotations`` can have any amount of 2D-list, where first dimension is the sentence, 
+and the second represent the annotated lemmes within each sentence.
+
+Timestamps of a given annotation are mapped with start/end time and converted appropriately to match them against 
+equivalent timestamps of other metadata files.
+
+
+#### V2 - Sentence Annotations
+
+
+
+
+#### V3 - Precise Annotations

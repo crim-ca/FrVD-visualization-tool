@@ -4,7 +4,6 @@ Minimalistic video player that allows visualization and easier interpretation of
 import argparse
 import difflib
 import itertools
-import json
 import logging
 import math
 import os
@@ -35,6 +34,7 @@ class VideoResultPlayerApp(object):
     """
     Builds and runs the player by looping video frames and handling events.
     """
+    version = "0.5.0"   # updated automatically from bump version
     # flags and control
     error = False
     # video information
@@ -810,7 +810,7 @@ class VideoResultPlayerApp(object):
                                         t0            t1     t2   t3   t4     t5       t6   t7          t8
 
         .. seealso::
-            `docs/usage.md` for full details.
+            :ref:`Metadata Merging <docs/usage.md#metadata-merging>` for full details.
 
         """
         if not video_description_full_metadata and not video_description_time_metadata and \
@@ -821,6 +821,7 @@ class VideoResultPlayerApp(object):
 
         # define generic metadata details without the merged timestamped metadata
         metadata = {
+            "version": self.version,
             "details": {self.vd_key: None, self.ta_key: None, self.vi_key: None},
             "merged": [],
             "mapping": mapping,
@@ -999,6 +1000,19 @@ class VideoResultPlayerApp(object):
         return None
 
     def parse_text_annotations_metadata(self, metadata_path):
+        """
+        Parse various version of JSON text annotation files into a common list of employable items.
+
+        Versions:
+            1. Original format that provides ``annotations`` as list of objects with ``lemme``, ``POS`` and ``type``.
+            2. Replaces ``annotations`` by ``annot_sentence``, and provides ``sentence`` directly.
+            3. Support different format by field lists and renamed fields.
+
+        :returns:
+            tuple of:
+            - subset of the parsed/corrected list of annotations
+            - full metadata loaded, with added version detected
+        """
         try:
             metadata = read_metafile(metadata_path)
             annotations = metadata["data"]
@@ -1016,11 +1030,11 @@ class VideoResultPlayerApp(object):
                 vd_sentence = annot.pop("vd", "")
                 annot_list = list(annot["annotations"])  # ensure copy to avoid edit error while iterating
 
-                # old format only provides annotations directly (the 'words' with POS, lemme, type)
+                # v1 format only provides annotations directly (the 'words' with POS, lemme, type)
                 # uses a 2D list of annotations for individually annotated sentences, but they are not provided:
                 #   {"annotations": [[ { "POS": "", "lemme": "", "type": "" }, { ... } ], ... ]
 
-                # new format contains the annotated sentence and corresponding annotations within this definition
+                # v2 format contains the annotated sentence and corresponding annotations within this definition
                 # they also employ the target format directly, except they use "annot_sentence" instead of "words"
                 #   {"annotations": [{ "sentence": "", "annot_sentence": [{ "POS": "", "lemme": "", "type": "" }] }] }
 
@@ -1039,7 +1053,7 @@ class VideoResultPlayerApp(object):
             return list(sorted(annotations, key=lambda _a: _a[self.ts_key])), metadata
         except Exception as exc:
             LOGGER.error("Could not parse text inference metadata file: [%s]", metadata_path, exc_info=exc)
-        return None
+        return None, None
 
     @staticmethod
     def parse_diff_sentences(vd_sentence, annotation_list):
