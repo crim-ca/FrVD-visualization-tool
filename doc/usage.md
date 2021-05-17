@@ -115,7 +115,13 @@ Section `details` provide general metadata provenance information from the corre
 Entries marked as `None` mean that no corresponding metadata file of that type was provided as input.
 
 Section `merged` provides the combined/extended timestamp entries where concordance between metadata types
-could be mapped, as illustrated in [previous section](#merge-procedure) 
+could be mapped, as illustrated in [previous section](#merge-procedure).
+
+Sections `version` and `references` are available only since version 1.0.0. 
+The `references` are added only when requested with ``--reference`` option, and easily reduces by half the size of 
+the resulting merged metadata by using JSON ``{"$ref": "references/<section>/<uuid>"}`` format to refer to repeated
+object definitions. Repetitions can occur very often, simply due to the misalignment problem of the various data 
+sources described in the [previous section](#merge-procedure).
 
 The format described above is summarized below. 
 Note that some items within `text_annotations` can change slightly in content based on the Text Annotation 
@@ -150,17 +156,20 @@ merged:
     text_annotation:    # (TA entry-1)
       annotations: 
         - sentence: <fist sentense of VD>
-          token:  # warning: this was named 'words' before 1.x, it is renamed because they are not necessarily 'words'
+          tokens:  # warning: this was named 'words' before 1.x, it is renamed because they are not necessarily 'words'
             - lemme: "<word|token>"
               pos: "NOUN|NOUN_ADJ|VERB|PRON_VERB|..."
-              type: "Sujet-Objet|Action-CasGénéral|Objet-Indirect-Objet|..."  # if V3, not always available
-              # if V3, following are also available
+              # if TA V1/V2, 'type' is provided, otherwise TA V3 replaces it by an extended IOB notation with classes
+              type: "Sujet-Objet|Action-CasGénéral|Objet-Indirect-Objet|..."
+              # if TA V3, following are also available, V1 and V2 don't have them
               token: "<token>"
-              iob: "I|O|B",
-              "offset":
+              iob:  # any amount applicable for that given token
+                - "O"                                                             # "O" for no previous annotation 
+                - "I|B+Sujet-Objet|Action-CasGénéral|Objet-Indirect-Objet|..."    # extended 'type' annotation 
+              offset:
                 - start: 0  # offset in sentence
                 - stop: 12  # start + len(token)
-            - [...]     # and so on for each text annotated word of the sentence 
+            - [...]     # and so on for each text annotated token of the sentence 
           TS: 
             - "Thh:mm:ss.fff"   # raw start timestamp
             - "Thh:mm:ss.fff"   # raw end timestamp
@@ -192,4 +201,14 @@ merged:
         start: <t1>
         end: <t2>
   # [...] and so on
+  
+  # only if 1.x version or above, and when using option '--references', following sections are generated
+  # all previous objects are regrouped here and linked using JSON {"$ref": "references/<section>/<uuid>"}
+  references:
+    # UUID to object mappings
+    actors: {}
+    scenes: {}
+    video_description: {}
+    video_inference: {}
+    text_annotation: {}
 ```

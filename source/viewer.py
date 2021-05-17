@@ -10,8 +10,9 @@ import os
 import re
 import sys
 import time
+import uuid
 from utils import ToolTip, draw_bbox, parse_timestamp, read_metafile, split_sentences, write_metafile
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import cv2 as cv
 import PIL.Image
@@ -101,6 +102,8 @@ class VideoResultPlayerApp(object):
     font_code_tag = "code"
     font_normal_tag = "normal"
     # shared metadata keys
+    ref_section = "references"
+    ref_key = "id"  # chosen specifically to match existing field in VD actors/scenes
     vd_key = "video_description"
     ta_key = "text_annotation"
     vi_key = "video_inference"
@@ -109,7 +112,7 @@ class VideoResultPlayerApp(object):
     precision = 2
 
     def __init__(self, video_file, video_description, video_results, text_annotations,
-                 merged_metadata=None, mapping_file=None, output=None,
+                 merged_metadata=None, mapping_file=None, use_references=False, output=None,
                  scale=1.0, queue_size=10, frame_drop_factor=4, frame_skip_factor=1):
         if video_file is not None:
             self.video_source = os.path.abspath(video_file)
@@ -135,7 +138,8 @@ class VideoResultPlayerApp(object):
             self.setup_window()
             self.setup_colors()
 
-        if not self.setup_metadata(video_description, video_results, text_annotations, merged_metadata, mapping_file):
+        if not self.setup_metadata(video_description, video_results, text_annotations, merged_metadata,
+                                   mapping_file, use_references):
             return
         if video_file is None:
             LOGGER.info("No video to display")
@@ -461,7 +465,8 @@ class VideoResultPlayerApp(object):
             text = "{}\n\n{}\n{}\n".format(entry, header, "_" * len(header))
             for i, annot in enumerate(annotations):
                 text += "\n[{}]: {}\n".format(i, annot["sentence"])
-                text += "\n".join([fmt.format(*[item[f] for f in fields]) for item in annot["words"]])
+                text += "\n".join([fmt.format(*[item[f] for f in fields])
+                                   for item in annot.get("words", annot["tokens"])])  # pre/post app version 1.x
         self.text_annot_textbox.insert(tk.END, "", self.font_normal_tag)
         self.text_annot_textbox.insert(tk.END, text, self.font_code_tag)
 
@@ -707,7 +712,8 @@ class VideoResultPlayerApp(object):
         # total 25 colors, more than enough for most use cases
         self.display_colors = list(self.display_colors) + list(half_colors)
 
-    def setup_metadata(self, video_description, video_results, text_annotations, merged_metadata, mapping_file):
+    def setup_metadata(self, video_description, video_results, text_annotations, merged_metadata,
+                       mapping_file, use_references):
         """
         Parse available metadata files and prepare the first entry according to provided file references.
         """
@@ -741,7 +747,7 @@ class VideoResultPlayerApp(object):
             if merged_metadata:
                 self.merge_metadata(video_desc_full_meta, video_infer_full_meta, text_annot_full_meta,
                                     self.video_desc_meta, self.video_infer_meta, self.text_annot_meta,
-                                    merged_metadata, self.mapping_label)
+                                    merged_metadata, self.mapping_label, use_references)
         except Exception as exc:
             self.error = True
             LOGGER.error("Invalid formats. One or more metadata file could not be parsed.", exc_info=exc)
@@ -793,7 +799,7 @@ class VideoResultPlayerApp(object):
     def merge_metadata(self,
                        video_description_full_metadata, video_inference_full_metadata, text_annotation_full_metadata,
                        video_description_time_metadata, video_inference_time_metadata, text_annotation_time_metadata,
-                       merged_path, mapping):
+                       merged_path, mapping, use_references):
         """
         Merges all provided metadata variations into a common file.
 
@@ -826,6 +832,9 @@ class VideoResultPlayerApp(object):
             "merged": [],
             "mapping": mapping,
         }
+        if use_references:
+            metadata[self.ref_section] = {self.vd_key: {}, self.ta_key: {}, self.vi_key: {}, "actors": {}, "scenes": {}}
+
         if video_description_full_metadata:
             video_description_full_metadata.pop("standard_vd_metadata", None)
             video_description_full_metadata.pop("augmented_vd_metadata", None)
@@ -837,6 +846,30 @@ class VideoResultPlayerApp(object):
             for meta in video_inference_full_metadata:
                 meta.pop("predictions", None)
                 metadata["details"][self.vi_key] = video_inference_full_metadata
+
+        def ref_link(meta_key, ref_id):
+            return {"$ref": "{}/{}/{}".format(self.ref_section, meta_key, ref_id)}
+
+        def make_ref(meta_entry, meta_key):
+            """
+            Generates the JSON link pointing to the metadata entry, and adds it to references if not already done.
+            """
+            meta_entry.setdefault(self.ref_key, str(uuid.uuid4()))
+            ref_id = meta_entry[self.ref_key]
+            refs = metadata[self.ref_section]  # type: Dict[str, Dict[str, Any]]
+            if ref_id not in refs[meta_key]:
+                refs[meta_key][ref_id] = meta_entry
+            return ref_link(meta_key, ref_id)
+
+        if use_references and metadata["details"][self.vd_key] is not None:
+            # patch all existing VD references to use real JSON '$ref' instead of literal UUID placed as-is
+            for meta_section in ["actors", "scenes"]:
+                section_items = metadata["details"][self.vd_key]["metadata"].pop(meta_section, [])  # noqa
+                for meta_item in section_items:
+                    make_ref(meta_item, meta_section)
+                for vd in video_description_time_metadata:
+                    for i in range(len(vd[meta_section])):
+                        vd[meta_section][i] = ref_link(meta_section, vd[meta_section][i])
 
         # lookup timestamped metadata entries and combine them appropriately
         vd_index = None
@@ -856,7 +889,9 @@ class VideoResultPlayerApp(object):
             video_inference_time_metadata = []
 
         def next_entry(meta_list, meta_index):
-            """Finds the active metadata entry for any given metadata-type against current index and start/end times."""
+            """
+            Finds the active metadata entry for any given metadata-type against current index and start/end times.
+            """
             if meta_index is None:
                 return None, None, None, None
             meta_entry = meta_list[meta_index]
@@ -922,9 +957,15 @@ class VideoResultPlayerApp(object):
 
             # update current metadata entry, empty if time is lower/greater than current portion
             # start times need to be computed after 'next_entry' call to find the start time of all meta portions
-            new_entry[self.vd_key] = vd_entry
-            new_entry[self.ta_key] = ta_entry
-            new_entry[self.vi_key] = vi_entries
+            if use_references:
+                new_entry[self.vd_key] = make_ref(vd_entry, self.vd_key) if vd_entry else None
+                new_entry[self.ta_key] = make_ref(ta_entry, self.ta_key) if ta_entry else None
+                new_entry[self.vi_key] = [make_ref(vi_entries[i], self.vi_key) if vi_entries[i] else None
+                                          for i in range(len(vi_entries))]
+            else:
+                new_entry[self.vd_key] = vd_entry
+                new_entry[self.ta_key] = ta_entry
+                new_entry[self.vi_key] = vi_entries
 
             # apply current merged start/end times and add to list of merged metadata
             new_entry[self.ts_key] = last_time
@@ -1027,8 +1068,19 @@ class VideoResultPlayerApp(object):
                 annot["start"] = sec_s
                 annot["end"] = sec_e
                 # extend 2D list into sentences/words metadata and drop redundant VD
-                vd_sentence = annot.pop("vd", "")
-                annot_list = list(annot["annotations"])  # ensure copy to avoid edit error while iterating
+                vd_paragraph = annot.pop("vd", "")
+
+                # v3 ensures precise annotations for every item, detect it and use them right away
+                if "annot_precises" in annot:
+                    metadata.setdefault("version", 3)
+                    annot_key = "annot_precises"
+                    token_key = "tokens"
+                    is_v3 = True
+                else:
+                    annot_key = "annotations"
+                    token_key = "words"
+                    is_v3 = False
+                annot_list = list(annot.pop(annot_key))  # ensure copy to avoid edit error while iterating
 
                 # v1 format only provides annotations directly (the 'words' with POS, lemme, type)
                 # uses a 2D list of annotations for individually annotated sentences, but they are not provided:
@@ -1041,27 +1093,43 @@ class VideoResultPlayerApp(object):
                 if not annot_list or all("annot_sentence" in a and not a["annot_sentence"] for a in annot_list):
                     annot["annotations"] = []  # skip empty annotations
                     continue
-                elif all("sentence" in a and "annot_sentence" in a for a in annot_list):
-                    # show mismatches between new format sentences and how we would normally parse them from old format
-                    # don't update anything though, we employ provided sentences directly
-                    self.parse_diff_sentences(vd_sentence, annot_list)
+                # v2/v3
+                elif is_v3 or all("sentence" in a and "annot_sentence" in a for a in annot_list):
+                    # show mismatches between v2 format sentences and how heuristics normally parse them in v1 format
+                    # don't update them though if they exist, we employ provided sentences directly
+                    metadata.setdefault("version", 2)
+                    self.parse_diff_sentences(vd_paragraph, annot_list)
                     sentences = [annot_sentence["sentence"] for annot_sentence in annot_list]
-                    annot_list = [annot_sentence["annot_sentence"] for annot_sentence in annot_list]
+                    if is_v3:
+                        # v3 are already at the right level, but require of rewrite of structure format
+                        annot_list = self.extract_sentence_tokens(annot_list)
+                    else:
+                        # v2 already offers a sub-list of partial 'token' objects for each annotated sentence
+                        # bump structure upward since we are already processing per-sentence
+                        annot_list = [annot_sentence["annot_sentence"] for annot_sentence in annot_list]
+                # v1
                 else:
-                    sentences, annot_list = self.parse_split_sentences(vd_sentence, annot_list)
-                annot["annotations"] = [{"sentence": s, "words": a} for s, a in zip(sentences, annot_list)]
+                    # convert of 2D-list to list of object is done inline while extracting corresponding sentences
+                    # sentences use the heuristics split from the VD
+                    sentences, annot_list = self.parse_split_sentences(vd_paragraph, annot_list)
+                annot["annotations"] = [{"sentence": s, token_key: a} for s, a in zip(sentences, annot_list)]
+
+            # wait until all possible cases were considered to set the version
+            # in case intermediate annotation somehow did not provide 'annot_sentence' that detects v2
+            metadata.setdefault("version", 1)
             return list(sorted(annotations, key=lambda _a: _a[self.ts_key])), metadata
+
         except Exception as exc:
             LOGGER.error("Could not parse text inference metadata file: [%s]", metadata_path, exc_info=exc)
         return None, None
 
     @staticmethod
-    def parse_diff_sentences(vd_sentence, annotation_list):
+    def parse_diff_sentences(vd_paragraph, annotation_list):
         if not LOGGER.isEnabledFor(logging.DEBUG):
             return
         try:
             sentences_annot = [annot["sentence"] for annot in annotation_list]
-            sentences_parsed = split_sentences(vd_sentence)
+            sentences_parsed = split_sentences(vd_paragraph)
             if sentences_parsed != sentences_annot:
                 diff = difflib.context_diff(sentences_parsed, sentences_annot,
                                             fromfile="VD Split Sentences", tofile="Annotated Sentences")
@@ -1070,8 +1138,8 @@ class VideoResultPlayerApp(object):
             pass  # ignore failure as this parsing is only to attempt informing about found differences, not critical
 
     @staticmethod
-    def parse_split_sentences(vd_sentence, annotation_list):
-        sentences = split_sentences(vd_sentence)
+    def parse_split_sentences(vd_paragraph, annotation_list):
+        sentences = split_sentences(vd_paragraph)
         # note:
         #  Original annotations sometime have errors due to capital letters incorrectly interpreted
         #  as beginning of new sentence.
@@ -1092,6 +1160,31 @@ class VideoResultPlayerApp(object):
                 # merge over abundant annotations
                 annotation_list[0].extend(annotation_list.pop(1))
         return sentences, annotation_list
+
+    @staticmethod
+    def extract_sentence_tokens(annotation_list):
+        """
+        Parses Text Annotation V3 format into similar format of previous merge result.
+
+        Converts annotation tokens per sentence as (dict of field-lists of same lengths) to the corresponding
+        (list of token objects with respective fields), which matches previous merging formats, with additional fields.
+        The result is filtered out of any redundant details always expected to be available at higher level.
+        """
+        sentence_tokens = []
+        for i, sentence in enumerate(annotation_list):
+            sentence_tokens.append([])
+            for tkt in range(len(sentence["token"])):
+                # transfer items
+                sentence_tokens[-1].append({})
+                token = sentence_tokens[-1][tkt]
+                for field in sentence:
+                    if field in ["TS", "annot", "sentence"]:
+                        continue  # ignore redundant metadata already available in parent
+                    token[field] = sentence[field][tkt]
+                # rewrite field formats
+                offset = token["offset"].split(" ")
+                token["offset"] = {"start": int(offset[0]), "end": int(offset[1])}
+        return sentence_tokens
 
 
 def make_parser():
@@ -1118,6 +1211,10 @@ def make_parser():
     util_opts.add_argument("--merged", "-m", dest="merged_metadata",
                            help="Output path of merged metadata JSON/YAML file from all other metadata files "
                                 "with realigned timestamps of corresponding sections.")
+    util_opts.add_argument("--references", "-R", dest="use_references", default=False, action="store_true",
+                           help="Indicates if JSON references ($ref) should be employed when generating merged "
+                                "metadata to avoid repeating elements. The merged content will use UUID links pointing "
+                                "to references that overlap across sections instead of copying them.")
     util_opts.add_argument("--mapping", "--map", "-M", dest="mapping_file",
                            help="JSON/YAML file with class name mapping. When provided, class names within "
                                 "text annotations and video inference metadata that correspond to a given key will "

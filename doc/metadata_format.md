@@ -191,12 +191,13 @@ against equivalent timestamps of other metadata files.
 }
 ```
 
-This format modified the previous 2D list to employ a list of objects instead, each containing the original 
+This format modified the previous 2D-list to employ a list of objects instead, each containing the original 
 annotation format under the field ``annot_sentence``.
 
 Additionally, the pre-processed ``sentence`` field is provided, but sometimes the amount of provided entries does
-not correspond to the detected number of *sentences* within the ``vd``. Heuristics of the previous version are 
-therefore employed again to pad missing entries, but use provided ones whenever available.
+not correspond to the detected number of *sentences* within the ``vd``. Heuristics of the previous 
+[V1](#v1---original-annotations) version are therefore still processed to display (debug) and differences encountered.
+The provided `senttence` are preserved regardless of mismatches.
 
 #### V3 - Precise Annotations
 

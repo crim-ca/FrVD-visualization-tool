@@ -14,6 +14,17 @@
 * Insert the current application version within the merged file to allow tracking.
   Merged files that do not provide ``version`` are generated with a prior version.
 
+* Add ``--references`` (`-r`) options to generate ``--merge`` file with references. Each time a VD, TA or VI item is
+  used to generate the combined result, a UUID is placed instead of the literal object. All corresponding objects are
+  then listed in separate mappings to avoid unnecessary duplication of data. When using this option, parsing of a file
+  will require resolution of those references. Otherwise, the duplicated data is still returned (without `-r` flag).
+  
+* Use explicit loading of JSON format when detected through ``json`` package since it parses large metadata 
+  much faster than ``yaml``.
+  
+* Remove unnecessary cary-over of ``annot`` and ``annot_precise`` original data from Text Annotations when generating 
+  merge, since the same information (different format) is already contained in the parsed and resolved merge result.
+
 ### [0.5.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/0.5.0) (2021-04-26)
 
 * Support Text Annotations version 2:

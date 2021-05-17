@@ -3,11 +3,18 @@ import json
 import tkinter as tk
 import yaml
 from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import List
 
 
 def read_metafile(path):
     with open(path) as meta_file:
-        metadata = yaml.safe_load(meta_file)
+        if path.endswith(".json"):
+            metadata = json.load(meta_file)
+        else:
+            metadata = yaml.safe_load(meta_file)
     return metadata
 
 
@@ -20,6 +27,10 @@ def write_metafile(metadata, path):
 
 
 def split_sentences(text):
+    # type: (str) -> List[str]
+    """
+    Heuristic to generate the list of sentences from a paragraph.
+    """
     punctuations = [".", "!", "?"]
     for stop in punctuations:
         text = text.replace("{} ".format(stop), "{}<STOP>".format(stop))
