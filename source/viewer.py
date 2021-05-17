@@ -35,7 +35,7 @@ class VideoResultPlayerApp(object):
     """
     Builds and runs the player by looping video frames and handling events.
     """
-    version = "0.5.0"   # updated automatically from bump version
+    version = "1.0.0"   # updated automatically from bump version
     # flags and control
     error = False
     # video information
