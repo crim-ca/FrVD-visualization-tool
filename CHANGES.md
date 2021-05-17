@@ -1,7 +1,8 @@
 ## CHANGES
 
-
-### [Unreleased](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer) (latest)
+[Unreleased](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer) (latest)
+------------------------------------------------------------------------------------------------------------------------
+____________
 
 * Support Text Annotations version 2:
   - Detect and employ `annot_precise` metadata when provided in Text Annotations.
@@ -25,22 +26,30 @@
 * Remove unnecessary cary-over of ``annot`` and ``annot_precise`` original data from Text Annotations when generating 
   merge, since the same information (different format) is already contained in the parsed and resolved merge result.
 
-### [0.5.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/0.5.0) (2021-04-26)
+[0.5.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/0.5.0) (2021-04-26)
+------------------------------------------------------------------------------------------------------------------------
+____________
 
 * Support Text Annotations version 2:
   - Directly employ provided `sentence` when available, or keep generating them otherwise. 
   - Adjust dynamically the loaded `annot_sentence` used instead of `annotations`.
 
-### [0.4.1](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/0.4.1) (2021-03-01)
+[0.4.1](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/0.4.1) (2021-03-01)
+------------------------------------------------------------------------------------------------------------------------
+____________
 
 * Fix timestamp milliseconds parsing that caused errors in some cases because of too strict format.
 
-### [0.4.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/0.4.0) (2021-01-26)
+[0.4.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/0.4.0) (2021-01-26)
+------------------------------------------------------------------------------------------------------------------------
+____________
 
 * Support multiple video predictions provided through variable bounding boxes targets in the scene.
 * Display provided bounding boxes when available.
 
-### [0.3.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/0.3.0) (2020-11-27)
+[0.3.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/0.3.0) (2020-11-27)
+------------------------------------------------------------------------------------------------------------------------
+____________
 
 * Support multiple Video Inference metadata files simultaneously rendered in data fields.
 * Add better scrollbars support to allow moving around the data result fields.
@@ -48,7 +57,9 @@
 * Fix error of frame seek at the end of the video not able to properly retrieve the last metadata items.
 * Update the demo screenshot with the added metadata rendering.
 
-### [0.2.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/0.2.0) (2020-11-17)
+[0.2.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/0.2.0) (2020-11-17)
+------------------------------------------------------------------------------------------------------------------------
+____________
 
 * Add documentation.
   - Expected data formats and details.
@@ -57,7 +68,9 @@
 
 * Add snapshot button to save results of a single frame.
 
-### [0.1.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/0.1.0) (2020-11-17)
+[0.1.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/0.1.0) (2020-11-17)
+------------------------------------------------------------------------------------------------------------------------
+____________
 
 * First implementation of the result viewer.
   - Video display area.
