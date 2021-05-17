@@ -1,5 +1,7 @@
 # video-result-viewer
 
+<img alt="version-0.5.0" src="https://img.shields.io/badge/version-0.5.0-blue"/>
+
 Minimalistic video player that allows visualization and easier interpretation of FAR-VVD results. 
 
 ![demo](./doc/demo-preview.png)
@@ -17,7 +19,9 @@ The tool takes as input the following information and displays them for correspo
 [text_results]: https://www.crim.ca/stash/projects/FAR/repos/annotation-vd/
 [video_infer]: https://www.crim.ca/stash/projects/FAR/repos/video-action-recognition/
 
-**NOTE**:
+It can also combine all of those results into a [merged file](doc/usage.md#metadata-merging) with aligned timestamps.
+
+**NOTE** <br>
 Further options are available using the CLI script.
 
 
