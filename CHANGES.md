@@ -4,13 +4,15 @@
 ------------------------------------------------------------------------------------------------------------------------
 ____________
 
-* Nothing new for the moment.
+* Support Text Annotations version 4: 
+  - Detect ``annotations`` that directly provide the same metadata format as V3 instead of ``annot_precises``,  
+    and differentiate it from older format using ``annot_sentences`` (V2).
 
 [1.0.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.0.0) (2021-05-17)
 ------------------------------------------------------------------------------------------------------------------------
 ____________
 
-* Support Text Annotations version 2:
+* Support Text Annotations version 3:
   - Detect and employ `annot_precise` metadata when provided in Text Annotations.
     This metadata contains similar information as `annotations`, but with additional fields that where not previously 
     available (`iob`, `offset`, etc.). 

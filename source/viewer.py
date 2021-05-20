@@ -1075,11 +1075,18 @@ class VideoResultPlayerApp(object):
                     metadata.setdefault("version", 3)
                     annot_key = "annot_precises"
                     token_key = "tokens"
-                    is_v3 = True
+                    is_precise = True
+                # v4 format equivalent to v3 format uses "annotations" directly instead of "annot_precises"
+                # distinguish from v2 "annotations" by looking for sub-field "annot_sentence"
+                elif "annotations" in annot and not any("annot_sentence" in a for a in annot["annotations"]):
+                    metadata.setdefault("version", 4)
+                    annot_key = "annotations"
+                    token_key = "tokens"
+                    is_precise = True
                 else:
                     annot_key = "annotations"
                     token_key = "words"
-                    is_v3 = False
+                    is_precise = False
                 annot_list = list(annot.pop(annot_key))  # ensure copy to avoid edit error while iterating
 
                 # v1 format only provides annotations directly (the 'words' with POS, lemme, type)
@@ -1093,14 +1100,14 @@ class VideoResultPlayerApp(object):
                 if not annot_list or all("annot_sentence" in a and not a["annot_sentence"] for a in annot_list):
                     annot["annotations"] = []  # skip empty annotations
                     continue
-                # v2/v3
-                elif is_v3 or all("sentence" in a and "annot_sentence" in a for a in annot_list):
+                # v2/v3/v4
+                elif is_precise or all("sentence" in a and "annot_sentence" in a for a in annot_list):
                     # show mismatches between v2 format sentences and how heuristics normally parse them in v1 format
                     # don't update them though if they exist, we employ provided sentences directly
                     metadata.setdefault("version", 2)
                     self.parse_diff_sentences(vd_paragraph, annot_list)
                     sentences = [annot_sentence["sentence"] for annot_sentence in annot_list]
-                    if is_v3:
+                    if is_precise:
                         # v3 are already at the right level, but require of rewrite of structure format
                         annot_list = self.extract_sentence_tokens(annot_list)
                     else:
