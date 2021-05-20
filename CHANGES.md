@@ -4,6 +4,12 @@
 ------------------------------------------------------------------------------------------------------------------------
 ____________
 
+* Nothing new for the moment.
+
+[1.1.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.1.0) (2021-05-20)
+------------------------------------------------------------------------------------------------------------------------
+____________
+
 * Support Text Annotations version 4: 
   - Detect ``annotations`` that directly provide the same metadata format as V3 instead of ``annot_precises``,  
     and differentiate it from older format using ``annot_sentences`` (V2).
