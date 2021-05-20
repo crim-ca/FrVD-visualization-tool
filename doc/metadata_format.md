@@ -266,3 +266,13 @@ indicates the word ``Avertissement``, which refers to the ``lemme`` of index 0 `
 characters (start: `0`, end: `13`, string separated by single space) within the ``sentence``. 
 The Part-Of-Speech (`pos`) and Inside-Outside-Beginning (`iob`) information relative to the sentence entity 
 for the `token` are also available.
+
+#### V4 - Precise Annotations (as Annotations)
+
+In more recent cases, the field ``annotations`` is provided directly in place of ``annot_precises``. 
+The format under it is exactly the same as ``annot_precises`` of [V3](#v3---precise-annotations), but due to 
+possible parsing confusion with ``annotations`` from [V2](#v2---sentence-annotations), the sub-field ``annot_sentence`` 
+is looked for explicitly to distinguish between them. 
+
+If the field ``annot_sentence`` is present, [V2](#v2---sentence-annotations) parsing is employed.
+Otherwise, parsing proceeds using [V3](#v3---precise-annotations), applying all usual formatting rules.
