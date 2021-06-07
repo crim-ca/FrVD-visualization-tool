@@ -90,7 +90,9 @@ class VideoResultPlayerApp(object):
     text_annot_textbox = None
     snapshot_button = None
     checkbox_regions = None
+    checkbox_regions_central = None
     display_regions = None
+    display_regions_central = None
     display_colors = None
     play_button = None
     play_state = True
@@ -230,17 +232,31 @@ class VideoResultPlayerApp(object):
                                          width=20,  padx=padding, pady=padding, command=self.snapshot)
         self.snapshot_button.pack(side=tk.LEFT, anchor=tk.NW)
 
+        txt_display_regions = "Display video inference regions"
+        txt_display_central = "Display only central regions"
+        checkbox_label_width = max(len(txt_display_central), len(txt_display_regions))
         self.checkbox_regions = tk.Frame(panel_video_viewer)
         self.display_regions = tk.IntVar(value=1)
-        checkbox_regions_label = tk.Label(self.checkbox_regions, text="Display regions")
-        checkbox_regions_label.grid(row=0, column=0)
+        checkbox_regions_label = tk.Label(self.checkbox_regions, justify=tk.LEFT, anchor=tk.W,
+                                          width=checkbox_label_width, text=txt_display_regions)
+        checkbox_regions_label.grid(row=0, column=1)
         checkbox_regions_check = tk.Checkbutton(self.checkbox_regions, variable=self.display_regions)
-        checkbox_regions_check.grid(row=0, column=1)
-        ToolTip(self.checkbox_regions, justify=tk.LEFT,
+        checkbox_regions_check.grid(row=0, column=0)
+        ToolTip(checkbox_regions_check, justify=tk.LEFT,
                 text="When displayed, dashed regions represent upcoming/passed central key frames.\n"
                      "Filled region box indicate current time is close to center key frame of video segment metadata.\n"
                      "This is because regions are defined only for the central key frame of each segment, rather than\n"
                      "following objects over each frame.")
+        self.display_regions_central = tk.IntVar(value=1)
+        checkbox_central_label = tk.Label(self.checkbox_regions, justify=tk.LEFT, anchor=tk.W,
+                                          width=checkbox_label_width, text=txt_display_central)
+        checkbox_central_label.grid(row=1, column=1)
+        checkbox_central_check = tk.Checkbutton(self.checkbox_regions, variable=self.display_regions_central)
+        checkbox_central_check.grid(row=1, column=0)
+        ToolTip(checkbox_central_check, justify=tk.LEFT,
+                text="When enabled, only full bounding boxes around the video segment central time are displayed.\n"
+                     "Otherwise, both upcoming/passed center key (dashed) and central bounding boxes (full)\n"
+                     "are displayed.")
         self.checkbox_regions.pack(side=tk.RIGHT, anchor=tk.SE)
 
         self.video_desc_label = tk.Label(panel_video_desc, text="Video Description Metadata",
@@ -459,14 +475,22 @@ class VideoResultPlayerApp(object):
             # update displayed metadata as text table
             annotations = metadata["annotations"]
             fmt = "    {:<16s} | {:<24s} | {:<16s}"
-            fields = "POS", "type", "lemme"
+            fields = ["POS", "type", "lemme"]
             header = fmt.format(*fields)
             entry = "(index: {}, start: {:.2f}, end: {:.2f})".format(index, metadata["start"], metadata["end"])
             text = "{}\n\n{}\n{}\n".format(entry, header, "_" * len(header))
             for i, annot in enumerate(annotations):
                 text += "\n[{}]: {}\n".format(i, annot["sentence"])
-                text += "\n".join([fmt.format(*[item[f] for f in fields])
-                                   for item in annot.get("words", annot["tokens"])])  # pre/post app version 1.x
+                tokens = annot.get("words", annot.get("tokens", []))  # pre/post app version 1.x
+                for item in tokens:
+                    if "POS" in fields and "pos" in item:
+                        fields[0] = "pos"  # v3/v4 is lowercase
+                    if "type" in fields and "type" not in item:
+                        fields[1] = "iob"  # v3/v4 removed type
+                    if "iob" in fields:
+                        item = dict(item)  # copy to edit and leave original intact
+                        item["iob"] = ", ".join(item["iob"])  # can have multiple annotations
+                    text += "\n" + fmt.format(*[item[f] for f in fields])
         self.text_annot_textbox.insert(tk.END, "", self.font_normal_tag)
         self.text_annot_textbox.insert(tk.END, text, self.font_code_tag)
 
@@ -572,6 +596,7 @@ class VideoResultPlayerApp(object):
             |-----------|======|======|-----------|
 
         """
+        only_center = self.display_regions_central.get()
         for i, video_meta_index in enumerate(self.video_infer_indices):
             if self.video_infer_multi[i]:
                 meta = self.video_infer_meta[i][video_meta_index]
@@ -587,6 +612,8 @@ class VideoResultPlayerApp(object):
                 dash = 5  # dash spacing if not within ±dt, otherwise filled
                 if ts_dt <= self.frame_time <= te_dt:
                     dash = None
+                if only_center and dash:
+                    continue  # skip draw dashed bounding box if not within ±dt when not requested
                 for r, region in enumerate(meta["regions"]):
                     tl = (region["bbox"][0], region["bbox"][1])
                     br = (region["bbox"][2], region["bbox"][3])
@@ -1070,6 +1097,14 @@ class VideoResultPlayerApp(object):
                 # extend 2D list into sentences/words metadata and drop redundant VD
                 vd_paragraph = annot.pop("vd", "")
 
+                # v1 format only provides annotations directly (the 'words' with POS, lemme, type)
+                # uses a 2D list of annotations for individually annotated sentences, but they are not provided:
+                #   {"annotations": [[ { "POS": "", "lemme": "", "type": "" }, { ... } ], ... ]
+
+                # v2 format contains the annotated sentence and corresponding annotations within this definition
+                # they also employ the target format directly, except they use "annot_sentence" instead of "words"
+                #   {"annotations": [{ "sentence": "", "annot_sentence": [{ "POS": "", "lemme": "", "type": "" }] }] }
+
                 # v3 ensures precise annotations for every item, detect it and use them right away
                 if "annot_precises" in annot:
                     metadata.setdefault("version", 3)
@@ -1078,7 +1113,10 @@ class VideoResultPlayerApp(object):
                     is_precise = True
                 # v4 format equivalent to v3 format uses "annotations" directly instead of "annot_precises"
                 # distinguish from v2 "annotations" by looking for sub-field "annot_sentence"
-                elif "annotations" in annot and not any("annot_sentence" in a for a in annot["annotations"]):
+                # distinguish from v1 "annotations" by format (2D list instead of list of dict)
+                elif ("annotations" in annot
+                      and not any(isinstance(a, list) for a in annot["annotations"])
+                      and not any("annot_sentence" in a for a in annot["annotations"])):
                     metadata.setdefault("version", 4)
                     annot_key = "annotations"
                     token_key = "tokens"
@@ -1088,19 +1126,14 @@ class VideoResultPlayerApp(object):
                     token_key = "words"
                     is_precise = False
                 annot_list = list(annot.pop(annot_key))  # ensure copy to avoid edit error while iterating
+                annot_flat = [a for aa in annot_list for a in aa]  # flatten v1 2D list to check if is empty
 
-                # v1 format only provides annotations directly (the 'words' with POS, lemme, type)
-                # uses a 2D list of annotations for individually annotated sentences, but they are not provided:
-                #   {"annotations": [[ { "POS": "", "lemme": "", "type": "" }, { ... } ], ... ]
-
-                # v2 format contains the annotated sentence and corresponding annotations within this definition
-                # they also employ the target format directly, except they use "annot_sentence" instead of "words"
-                #   {"annotations": [{ "sentence": "", "annot_sentence": [{ "POS": "", "lemme": "", "type": "" }] }] }
-
-                if not annot_list or all("annot_sentence" in a and not a["annot_sentence"] for a in annot_list):
-                    annot["annotations"] = []  # skip empty annotations
+                # skip empty annotations
+                if (not annot_list or not annot_flat
+                        or all("annot_sentence" in a and not a["annot_sentence"] for a in annot_list)):
+                    annot["annotations"] = []
                     continue
-                # v2/v3/v4
+                # parse v2/v3/v4
                 elif is_precise or all("sentence" in a and "annot_sentence" in a for a in annot_list):
                     # show mismatches between v2 format sentences and how heuristics normally parse them in v1 format
                     # don't update them though if they exist, we employ provided sentences directly
@@ -1114,7 +1147,7 @@ class VideoResultPlayerApp(object):
                         # v2 already offers a sub-list of partial 'token' objects for each annotated sentence
                         # bump structure upward since we are already processing per-sentence
                         annot_list = [annot_sentence["annot_sentence"] for annot_sentence in annot_list]
-                # v1
+                # parse v1
                 else:
                     # convert of 2D-list to list of object is done inline while extracting corresponding sentences
                     # sentences use the heuristics split from the VD
