@@ -4,6 +4,12 @@
 ------------------------------------------------------------------------------------------------------------------------
 ____________
 
+* Nothing new for the moment.
+
+[1.2.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.2.0) (2021-06-07)
+------------------------------------------------------------------------------------------------------------------------
+____________
+
 * Add checkbox option to display only the central video-segment bounding boxes when provided from Video Inference 
   metadata instead of enforced both central and dashed (outside delta central key frame) bounding boxes. 
 * Fix invalid resolution of V1 Text Annotations against other version formats when the provided annotations were empty
