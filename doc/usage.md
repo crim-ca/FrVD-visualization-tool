@@ -72,14 +72,19 @@ Metadata of [Text Annotations](metadata_format.md#text-annotation-metadata-ta) (
 [Video-Description](metadata_format.md#video-description-metadata-vd) (VD), but this is not necessarily the case 
 for [Video Inferences](metadata_format.md#video-action-recognition-inference-metadata-vi) (VI). 
 
-For this reason, additional entries are padded as illustrated below:
+A similar situation can happen for [Text Inferences](metadata_format.md#text-inference-metadata-ti) (TI) which usually
+are well aligned with (TA), but contain some metadata *holes* since automatic inference is not always available for 
+each possible annotation, which creates misalignment with other metadata sources according to timestamps.  
+
+For this reason, additional entries are padded and extended as illustrated below:
 
     [META-TYPE]                 ts                                                              te
 
     meta-video-desc     (VD)    |........entry-1..........|.................entry-2.............|
     meta-text-annot     (TA)    |........entry-1..........|..........entry-2........|...<none>..|
-    meta-video-infer    (VD[1]) |...entry-1...|.....entry-2....|....entry-3....|.....entry-4....|
-    meta-video-infer    (VD[N]) |........entry-1.....|.....entry-2....|....entry-3..|..entry-3..|
+    meta-text-infer     (TI)    |........<none>...........|..........entry-1........|...<none>..|
+    meta-video-infer    (VI[1]) |...entry-1...|.....entry-2....|....entry-3....|.....entry-4....|
+    meta-video-infer    (VI[N]) |........entry-1.....|.....entry-2....|....entry-3..|..entry-3..|
 
     merged                      |.....M1......|..M2..|.M3.|.M4.|..M5..|...M6...|.M7.|.....M8....|
                                 t0            t1     t2   t3   t4     t5       t6   t7          t8

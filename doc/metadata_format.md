@@ -37,7 +37,7 @@ identical, and are therefore only represented once below.
 For each video-description entry, the mandatory fields are ``start_ms``, ``end_ms`` and ``vd``. Other elements are not
 currently employed. The extracted timestamps are mapped against corresponding ones of metadata files from next sections.
 
-``` json 
+```json 
 {
   "version": "0.0.1",
   "date_generated": "2020-02-22 02:27:53.305967",
@@ -88,7 +88,7 @@ The only mandatory field is ``predictions``, and more specifically, the ``start`
 and ``scores`` entries for each of those list items. Each segment timestamps are converted to be matched against other
 metadata files. 
 
-``` json 
+```json 
 {
   "command": "<command>",
   "model": "<model_name>",
@@ -109,7 +109,7 @@ metadata files.
 
 ### Text Annotation Metadata (TA)
 
-Following is the expected format from text annotation metadata JSON files.
+Following are the expected formats from text annotation metadata JSON files.
 
 See also:
 
@@ -121,7 +121,7 @@ See also:
 
 **NOTE** <br>
 Different formats are presented to keep track of their evolution over time. <br> 
-The [latest](#v3---precise-annotations) one should be used. 
+They should still all work interchangeably, but latest one would usually offer more metadata contents.
 
 
 #### V1 - Original Annotations
@@ -276,3 +276,39 @@ is looked for explicitly to distinguish between them.
 
 If the field ``annot_sentence`` is present, [V2](#v2---sentence-annotations) parsing is employed.
 Otherwise, parsing proceeds using [V3](#v3---precise-annotations), applying all usual formatting rules.
+
+### Text Inference Metadata (TI)
+
+This file is expected to be provided in TSV format. 
+
+It is intended to provide action mapping strategies between different types of lexical resources, embeddings 
+generation methods and reference gold standard definitions, against the original VD action.
+
+The format is presented below.
+
+```text
+<timestamp>    action    <mapping-strategy-1>    <mapping-strategy-2>    [...]    gold    [prox]
+T<ts>;T<te>    verb      action-1;action-2       (- | _ | '')                     verb    (- | <int>) 
+[...]
+```
+
+The first line is the header that indicates the name of each mapping strategy.
+The timestamp name is ignored, but assumed to be placed in the first column.
+Any number of mapping strategy can be defined. The `gold` standard is expected as the last one. 
+Optionally, the `prox` (proximity) can also be provided after the `gold` standard.
+
+For each line, the first column is the start and end timestamps of the entry (ISO times prefixed by `T`). 
+They must be concatenated by `;`. Following is the single action for which mappings are generated for.
+For each following mapping strategy, any amount of *action* mapping values separated by `;` can be provided.
+
+Items annotated by either a single `-`, `_` or a blank entry will be assumed as *no action mapping* to be provided 
+for that case. Those unavailable mappings will be replaced by `null` during the merging strategy. 
+
+The `gold` standard should be a single mapping value (no `;` concatenated values). 
+It can again be `-`, `_` or an empty string when not provided.
+
+Finally, the `prox` field can be provided last.
+If missing, it is simply ignored.  Otherwise, the value should be either a single value formed of 
+either `-`, `_` or empty string (eg: when `gold` is also undefined) or an integer expected to represent the proximity
+of the key `action` against the mappings.
+Integers are preserved as is, while any other values are replaced by `0` during the parsing and merging strategy.
