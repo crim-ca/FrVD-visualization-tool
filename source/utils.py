@@ -1,3 +1,4 @@
+import csv
 import cv2 as cv
 import json
 import tkinter as tk
@@ -11,7 +12,10 @@ if TYPE_CHECKING:
 
 def read_metafile(path):
     with open(path) as meta_file:
-        if path.endswith(".json"):
+        if path.endswith(".tsv"):
+            reader = csv.reader(meta_file, delimiter="\t", quotechar='"')
+            metadata = [line for line in reader]
+        elif path.endswith(".json"):
             metadata = json.load(meta_file)
         else:
             metadata = yaml.safe_load(meta_file)
@@ -48,6 +52,14 @@ def parse_timestamp(timestamp):
         return datetime.strptime(timestamp, "T%H:%M:%S.%f")
     except ValueError:
         return datetime.strptime(timestamp, "T%H:%M:%S")
+
+
+def timestamp2seconds(ts):
+    # type: (datetime) -> float
+    """
+    Converts the timestamp into seconds duration.
+    """
+    return float("{}.{}".format((ts.hour * 3600 + ts.minute * 60 + ts.second), ts.microsecond))
 
 
 def draw_bbox(image, tl, br, text, color,

@@ -4,7 +4,18 @@
 ------------------------------------------------------------------------------------------------------------------------
 ____________
 
-* Nothing new for the moment.
+* Provide the `--text-auto` and `--text-manual` options to define the Text Annotation *method* that was employed.
+  If specified, *merged* result will contain the `method: "<method>"` entry or `"undefined"` value in the 
+  summary detail section of `text_annotaitons` metadata source.
+  
+* Implement parsing and merging of Text Inference TSV files that provide action mappings between different types of 
+  lexical resources, embeddings generation and reference gold standard definitions against the original VD action.
+  The new Text Inference metadata should be provided with `--ti`/`--text-inference` options similarly to other sources.
+  
+* Update documentation about new Text Inference (TI) content format. 
+  
+* Avoid initial metadata entries of each source to be incorrectly added during merge or displayed in viewer until 
+  the corresponding first start time is reached.
 
 [1.2.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.2.0) (2021-06-07)
 ------------------------------------------------------------------------------------------------------------------------

@@ -72,14 +72,19 @@ Metadata of [Text Annotations](metadata_format.md#text-annotation-metadata-ta) (
 [Video-Description](metadata_format.md#video-description-metadata-vd) (VD), but this is not necessarily the case 
 for [Video Inferences](metadata_format.md#video-action-recognition-inference-metadata-vi) (VI). 
 
-For this reason, additional entries are padded as illustrated below:
+A similar situation can happen for [Text Inferences](metadata_format.md#text-inference-metadata-ti) (TI) which usually
+are well aligned with (TA), but contain some metadata *holes* since automatic inference is not always available for 
+each possible text annotation segment, which creates misalignment with other metadata sources according to timestamps.  
+
+For this reason, additional entries are padded and extended as illustrated below:
 
     [META-TYPE]                 ts                                                              te
 
     meta-video-desc     (VD)    |........entry-1..........|.................entry-2.............|
     meta-text-annot     (TA)    |........entry-1..........|..........entry-2........|...<none>..|
-    meta-video-infer    (VD[1]) |...entry-1...|.....entry-2....|....entry-3....|.....entry-4....|
-    meta-video-infer    (VD[N]) |........entry-1.....|.....entry-2....|....entry-3..|..entry-3..|
+    meta-text-infer     (TI)    |........entry-1..........|..........<none>.........|..entry-2..|
+    meta-video-infer    (VI[1]) |...entry-1...|.....entry-2....|....entry-3....|.....entry-4....|
+    meta-video-infer    (VI[N]) |........entry-1.....|.....entry-2....|....entry-3..|..entry-3..|
 
     merged                      |.....M1......|..M2..|.M3.|.M4.|..M5..|...M6...|.M7.|.....M8....|
                                 t0            t1     t2   t3   t4     t5       t6   t7          t8
@@ -135,6 +140,7 @@ details:
   # for example, the location of original metadata files, the video title, configurations, etc. will be available here
   video_description: { <...> }
   text_annotation:  { <...> }
+  text_inference:  { <...> }  # only version >= 1.3.0
   video_inference: { <...> }
   
 merged:
@@ -181,7 +187,24 @@ merged:
           end_ms: <t3>
           start: <t0>
           end: <t3>
-        - [...]     # and so on for other sentences if VD provided multiple onces
+        - [...]     # and so on for other sentences if VD provided multiple ones
+    text_inference:    # only version >= 1.3.0
+      - start_ms: <t0>
+        end_ms: <t3>
+        start: <t0>
+        end: <t3>
+        TS: 
+          - "Thh:mm:ss.fff"   # raw start timestamp
+          - "Thh:mm:ss.fff"   # raw end timestamp 
+        action: "<action>"    # original VD action to be mapped
+        mappings:
+          - type: "<mapping-type>"  # identifier of the mapping method (one of the values listed in details)
+            actions: 
+              - "<mapped-action>"
+              - ...    # any number of mapped actions for that mapping type
+          - type: "gold"  # special type always expected
+            actions: ["<gold-action>"]
+            proximity: null | <int>  # if available, proximity measure of mapping to original action
     video_inference:   # (VI entry-1)
       - segment: <filename>
         name: <name>
