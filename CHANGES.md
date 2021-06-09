@@ -4,6 +4,12 @@
 ------------------------------------------------------------------------------------------------------------------------
 ____________
 
+* Nothing new for the moment.
+
+[1.4.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.4.0) (2021-06-09)
+------------------------------------------------------------------------------------------------------------------------
+____________
+
 * Fix invalid links when using JSON reference generation (`$ref` notations) to ensure they can be properly loaded by 
   packages such as [jsonref](https://pypi.org/project/jsonref/).
 
