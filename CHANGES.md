@@ -10,6 +10,9 @@ ____________
   
 * Implement parsing and merging of Text Inference TSV files that provide action mappings between different types of 
   lexical resources, embeddings generation and reference gold standard definitions against the original VD action.
+  The new Text Inference metadata should be provided with `--ti`/`--text-inference` options similarly to other sources.
+  
+* Update documentation about new Text Inference (TI) content format. 
   
 * Avoid initial metadata entries of each source to be incorrectly added during merge or displayed in viewer until 
   the corresponding first start time is reached.

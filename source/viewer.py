@@ -1148,11 +1148,9 @@ class VideoResultPlayerApp(object):
                 for name, values in zip(map_types, mapped):
                     map_values = [None if val in map_none else val for val in values.split(";")]
                     meta["mappings"].append({"type": name, "actions": map_values})
-                    if name == "gold":
-                        meta["mappings"][-1]["actions"] = meta["mappings"][-1]["actions"][0]
-                        if has_prox:
-                            proximity = line[-1] if line[-1] not in map_none else 0
-                            meta["mappings"][-1]["proximity"] = proximity
+                    if name == "gold" and has_prox:
+                        proximity = line[-1] if line[-1] not in map_none else 0
+                        meta["mappings"][-1]["proximity"] = proximity
                 mappings.append(meta)
             full_meta = {
                 "data": mappings,

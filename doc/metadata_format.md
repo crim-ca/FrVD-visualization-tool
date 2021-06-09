@@ -306,6 +306,8 @@ for that case. Those unavailable mappings will be replaced by `null` during the 
 
 The `gold` standard should be a single mapping value (no `;` concatenated values). 
 It can again be `-`, `_` or an empty string when not provided.
+For schema consistency, the merged result will still indicate the `gold` standard as a list of `actions` in the mapping, 
+but that list will always be composed of a single string if `gold` was provided, or a single `null` entry otherwise.
 
 Finally, the `prox` field can be provided last.
 If missing, it is simply ignored.  Otherwise, the value should be either a single value formed of 
