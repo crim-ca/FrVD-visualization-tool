@@ -4,7 +4,18 @@
 ------------------------------------------------------------------------------------------------------------------------
 ____________
 
-* Nothing new for the moment.
+* Fix invalid links when using JSON reference generation (`$ref` notations) to ensure they can be properly loaded by 
+  packages such as [jsonref](https://pypi.org/project/jsonref/).
+
+* Fix an issue where unspecified Video Inference (VI) metadata files would raise an error during argument parsing.
+
+* Support input files that could employ `$ref` links inside JSON or YAML metadata.
+
+* Support directly providing an input and pre-generated merged metadata file (`--input-metadata`) to be viewed 
+  with a video, skipping the metadata generation phase from the individual metadata file sources.
+  
+* Add metadata *total* entries following merge strategy that can deduplicate original entries to align timestamps,
+  and therefore do not necessarily match the original amount from the corresponding source. Both totals are reported.
 
 [1.3.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.3.0) (2021-06-09)
 ------------------------------------------------------------------------------------------------------------------------

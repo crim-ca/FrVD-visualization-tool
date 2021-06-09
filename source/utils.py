@@ -3,11 +3,13 @@ import cv2 as cv
 import json
 import tkinter as tk
 import yaml
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
+import jsonref
+
 if TYPE_CHECKING:
-    from typing import List
+    from typing import List, Union
 
 
 def read_metafile(path):
@@ -16,9 +18,10 @@ def read_metafile(path):
             reader = csv.reader(meta_file, delimiter="\t", quotechar='"')
             metadata = [line for line in reader]
         elif path.endswith(".json"):
-            metadata = json.load(meta_file)
+            metadata = jsonref.load(meta_file)
         else:
             metadata = yaml.safe_load(meta_file)
+            metadata = jsonref.JsonRef.replace_refs(metadata)
     return metadata
 
 
@@ -60,6 +63,18 @@ def timestamp2seconds(ts):
     Converts the timestamp into seconds duration.
     """
     return float("{}.{}".format((ts.hour * 3600 + ts.minute * 60 + ts.second), ts.microsecond))
+
+
+def seconds2timestamp(sec):
+    # type: (Union[int, float]) -> str
+    """
+    Converts seconds into the corresponding ISO time.
+    """
+    assert sec <= 86400, "Unsupported seconds longer then a day."
+    ts = str(timedelta(seconds=sec))
+    if (len(ts.split(".")[0])) == 7:
+        ts = "0" + ts
+    return "T" + ts
 
 
 def draw_bbox(image, tl, br, text, color,

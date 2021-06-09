@@ -11,7 +11,16 @@ import re
 import sys
 import time
 import uuid
-from utils import ToolTip, draw_bbox, parse_timestamp, read_metafile, split_sentences, timestamp2seconds, write_metafile
+from utils import (
+    ToolTip,
+    draw_bbox,
+    parse_timestamp,
+    read_metafile,
+    seconds2timestamp,
+    split_sentences,
+    timestamp2seconds,
+    write_metafile
+)
 from typing import Any, Dict, List, Optional
 
 import cv2 as cv
@@ -119,7 +128,8 @@ class VideoResultPlayerApp(object):
     precision = 2
 
     def __init__(self, video_file, video_description, video_inferences, text_annotations, text_inferences,
-                 text_auto=None, merged_metadata=None, mapping_file=None, use_references=False, output=None,
+                 text_auto=None, merged_metadata_input=None, merged_metadata_output=None,
+                 mapping_file=None, use_references=False, output=None,
                  scale=1.0, queue_size=10, frame_drop_factor=4, frame_skip_factor=1):
         if video_file is not None:
             self.video_source = os.path.abspath(video_file)
@@ -146,7 +156,8 @@ class VideoResultPlayerApp(object):
             self.setup_colors()
 
         valid_meta = self.setup_metadata(video_description, video_inferences, text_annotations, text_inferences,
-                                         text_auto, merged_metadata, mapping_file, use_references)
+                                         text_auto, merged_metadata_input, merged_metadata_output,
+                                         mapping_file, use_references)
         if not valid_meta:
             return
         if video_file is None:
@@ -421,8 +432,7 @@ class VideoResultPlayerApp(object):
         :param regions: boolean indicator for each file of whether it is formatted as single- or multi-predictions.
         :return: tuple of flattened (file indices, index of predictions set, corresponding metadata, region index)
         """
-        multi_indices = [len(metadata[number][indices[number]]["regions"]) if regions[number] else -1
-                         for number in range(len(metadata))]
+        multi_indices = [len(metadata[n][indices[n]]["regions"]) if regions[n] else -1 for n in range(len(metadata))]
         flatten_metadata = []
         flatten_indices = []
         flatten_number = []
@@ -449,7 +459,6 @@ class VideoResultPlayerApp(object):
             text = self.NO_DATA_TEXT
         else:
             text = ""
-            range(len(metadata))
             meta_lines = [
                 self.format_video_infer(number, index, meta, multi)
                 for (number, index, meta, multi)
@@ -746,12 +755,32 @@ class VideoResultPlayerApp(object):
         self.display_colors = list(self.display_colors) + list(half_colors)
 
     def setup_metadata(self, video_description, video_inferences, text_annotations, text_inferences,
-                       text_auto, merged_metadata, mapping_file, use_references):
+                       text_auto, merged_metadata_input, merged_metadata_output, mapping_file, use_references):
         """
         Parse available metadata files and prepare the first entry according to provided file references.
         """
         try:
             video_desc_full_meta = video_infer_full_meta = text_annot_full_meta = text_infer_full_meta = None
+            if merged_metadata_input:
+                LOGGER.info("Detected input merged metadata. Generation and other metadata sources will be ignored.")
+                LOGGER.info("Parsing merged metadata file [%s]...", merged_metadata_input)
+                metadata = read_metafile(merged_metadata_input)
+                merged, detail = metadata["merged"], metadata["details"]
+                vi_indices = detail.get("total_{}".format(self.vi_key), [])
+                vi_default = [None] * len(vi_indices)
+                self.video_desc_meta = [meta.get(self.vd_key) for meta in merged if meta.get(self.vd_key) is not None]
+                self.text_annot_meta = [meta.get(self.ta_key) for meta in merged if meta.get(self.ta_key) is not None]
+                self.text_infer_meta = [meta.get(self.ti_key) for meta in merged if meta.get(self.ti_key) is not None]
+                self.video_infer_meta = []
+                self.video_infer_multi = [meta.get("multi_predictions", False) for meta in detail[self.vi_key]]
+                for i in range(len(vi_indices)):
+                    vi_meta = [meta.get(self.vi_key, vi_default)[i] for meta in merged]
+                    self.video_infer_meta.append([meta for meta in vi_meta if meta is not None])
+                self.video_desc_index = 0 if detail.get("total_{}".format(self.vd_key), 0) > 0 else None
+                self.text_annot_index = 0 if detail.get("total_{}".format(self.ta_key), 0) > 0 else None
+                self.text_infer_index = 0 if detail.get("total_{}".format(self.ti_key), 0) > 0 else None
+                self.video_infer_indices = [0 if vi_index > 0 else None for vi_index in vi_indices]
+                return True
             if mapping_file:
                 LOGGER.info("Parsing class mapping file [%s]...", mapping_file)
                 self.setup_mapper(mapping_file)
@@ -791,12 +820,12 @@ class VideoResultPlayerApp(object):
                 self.text_infer_meta, text_infer_full_meta = self.parse_text_inferences_metadata(text_inferences)
             elif text_inferences:
                 LOGGER.warning("Skipping text inferences metadata file not found: [%s]", text_inferences)
-            if merged_metadata:
+            if merged_metadata_output:
                 self.merge_metadata(video_desc_full_meta, video_infer_full_meta,
                                     text_annot_full_meta, text_infer_full_meta,
                                     self.video_desc_meta, self.video_infer_meta,
                                     self.text_annot_meta, self.text_infer_meta,
-                                    merged_metadata, self.mapping_label, use_references)
+                                    merged_metadata_output, self.mapping_label, use_references)
         except Exception as exc:
             self.error = True
             LOGGER.error("Invalid formats. One or more metadata file could not be parsed.", exc_info=exc)
@@ -871,8 +900,8 @@ class VideoResultPlayerApp(object):
         metadata = {
             "version": self.version,
             "details": {self.vd_key: None, self.ta_key: None, self.ti_key: None, self.vi_key: None},
-            "merged": [],
             "mapping": mapping,
+            "merged": [],
         }
         if use_references:
             metadata[self.ref_section] = {
@@ -896,7 +925,7 @@ class VideoResultPlayerApp(object):
                 metadata["details"][self.vi_key] = video_inference_full_metadata
 
         def ref_link(meta_key, ref_id):
-            return {"$ref": "{}/{}/{}".format(self.ref_section, meta_key, ref_id)}
+            return {"$ref": "#/{}/{}/{}".format(self.ref_section, meta_key, ref_id)}
 
         def make_ref(meta_entry, meta_key):
             """
@@ -1044,16 +1073,32 @@ class VideoResultPlayerApp(object):
             last_time = end_time
 
         # add extra metadata and save to file
-        total_merged = len(metadata["merged"])
-        metadata["details"].update({
+        merged = metadata["merged"]  # type: List[Dict[str, Any]]
+        total_merged = len(merged)
+        total_merged_vd = len([meta for meta in merged if meta[self.vd_key] is not None])
+        total_merged_ta = len([meta for meta in merged if meta[self.ta_key] is not None])
+        total_merged_ti = len([meta for meta in merged if meta[self.ti_key] is not None])
+        total_merged_vi = [len([meta for meta in merged if meta[self.vi_key][i] is not None])
+                           for i in range(len(vi_indices))]
+        # rewrite details to have summary on top, followed by specific ones of each metadata type after
+        detail = {
             self.ts_key: first_time,
             self.te_key: last_time,
+            "start": first_time / 1000.,
+            "end": last_time / 1000.,
+            "TS": [seconds2timestamp(first_time / 1000.), seconds2timestamp(last_time / 1000.)],
             "total_merged": total_merged,
-            "total_{}".format(self.vd_key): len(video_description_time_metadata),
-            "total_{}".format(self.ta_key): len(text_annotation_time_metadata),
-            "total_{}".format(self.ti_key): len(text_inference_time_metadata),
-            "total_{}".format(self.vi_key): [len(vi) for vi in video_inference_time_metadata],
-        })
+            "total_merged_{}".format(self.vd_key): total_merged_vd,
+            "total_merged_{}".format(self.ta_key): total_merged_ta,
+            "total_merged_{}".format(self.ti_key): total_merged_ti,
+            "total_merged_{}".format(self.vi_key): total_merged_vi,
+            "total_{}".format(self.vd_key): vd_total,
+            "total_{}".format(self.ta_key): ta_total,
+            "total_{}".format(self.ti_key): ti_total,
+            "total_{}".format(self.vi_key): vi_totals,
+        }
+        detail.update(metadata["details"])
+        metadata["details"] = detail
         LOGGER.debug("Total amount of merged metadata entries: %s", total_merged)
         LOGGER.info("Generating merged metadata file: [%s]", merged_path)
         write_metafile(metadata, merged_path)
@@ -1331,18 +1376,25 @@ def make_parser():
     video_arg.add_argument("--no-video", action="store_true",
                            help="Disable video. Employ only metadata parsing. "
                                 "Must be combined with merged metadata output.")
-    annot_args = ap.add_argument_group(title="Annotation Arguments", description="Arguments for annotation files.")
-    annot_args.add_argument("--video-description", "--vd", dest="video_description",
+    meta_args = ap.add_argument_group(title="Metadata Annotation Arguments",
+                                      description="Arguments for annotation and inference metadata files.")
+    meta_mode = meta_args.add_mutually_exclusive_group()
+    meta_mode.add_argument("--input-metadata", "--meta", dest="merged_metadata_input",
+                           help="Pre-generated merged metadata file to load. "
+                                "Cannot be combined with other metadata sources.")
+    meta_multi = meta_mode.add_argument_group()
+    meta_multi.add_argument("--video-description", "--vd", dest="video_description",
                             help="JSON/YAML metadata file with original video-description annotations.")
-    annot_args.add_argument("--video-inference", "--vi", nargs="*", action="append", dest="video_inferences",
+    meta_multi.add_argument("--video-inference", "--vi", dest="video_inferences",
+                            nargs="*", action="append", default=[],
                             help="JSON/YAML metadata file(s) with video action recognition inference results. "
                                  "If multiple files are provided, they will be simultaneously displayed side-by-side.")
-    annot_args.add_argument("--text-annotation", "--ta", dest="text_annotations",
+    meta_multi.add_argument("--text-annotation", "--ta", dest="text_annotations",
                             help="JSON/YAML metadata file with text subjects and verbs annotations.")
-    annot_args.add_argument("--text-inference", "--ti", dest="text_inferences",
+    meta_multi.add_argument("--text-inference", "--ti", dest="text_inferences",
                             help="TSV metadata file that contains text annotations mapping between actions "
                                  "and inferred values by other lexical resources or embeddings.")
-    annot_mode = annot_args.add_mutually_exclusive_group()
+    annot_mode = meta_multi.add_mutually_exclusive_group()
     annot_mode.add_argument("--text-auto", dest="text_auto", action="store_true", default=None,
                             help="Indicate that the provided text annotations where generated automatically. "
                                  "If not explicitly defined as automatic/manual, the result will indicate 'undefined'.")
@@ -1354,9 +1406,10 @@ def make_parser():
                                       description="Options that configure extra functionalities.")
     util_opts.add_argument("--output", "-o", default="/tmp/video-result-viewer",
                            help="Output location of frame snapshots (default: [%(default)s]).")
-    util_opts.add_argument("--merged", "-m", dest="merged_metadata",
-                           help="Output path of merged metadata JSON/YAML file from all other metadata files "
-                                "with realigned timestamps of corresponding sections.")
+    util_opts.add_argument("--merged", "-m", dest="merged_metadata_output",
+                           help="Output path of generated merged metadata JSON/YAML file from all other metadata files "
+                                "from different sources with realigned timestamps of corresponding sections. "
+                                "Disabled if input metadata is already a merged file (--input-metadata).")
     util_opts.add_argument("--references", "-R", dest="use_references", default=False, action="store_true",
                            help="Indicates if JSON references ($ref) should be employed when generating merged "
                                 "metadata to avoid repeating elements. The merged content will use UUID links pointing "
@@ -1398,8 +1451,11 @@ def main():
     if ns.quiet:
         LOGGER.setLevel(logging.ERROR)
     args = vars(ns)
-    if ns.no_video and not ns.merged_metadata:
+    if ns.no_video and not ns.merged_metadata_output:
         LOGGER.error("Merged metadata file is required when no video is employed (only process metadata).")
+        return -1
+    if ns.no_video and ns.merged_metadata_input:
+        LOGGER.error("Merged metadata file as input cannot be viewed without a video.")
         return -1
     for rm_arg in ["debug", "quiet", "no_video"]:
         args.pop(rm_arg, None)
