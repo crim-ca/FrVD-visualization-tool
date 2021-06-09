@@ -4,6 +4,12 @@
 ------------------------------------------------------------------------------------------------------------------------
 ____________
 
+* Nothing new for the moment.
+
+[1.3.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.3.0) (2021-06-09)
+------------------------------------------------------------------------------------------------------------------------
+____________
+
 * Provide the `--text-auto` and `--text-manual` options to define the Text Annotation *method* that was employed.
   If specified, *merged* result will contain the `method: "<method>"` entry or `"undefined"` value in the 
   summary detail section of `text_annotaitons` metadata source.
