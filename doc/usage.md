@@ -142,6 +142,24 @@ details:
   text_annotation:  { <...> }
   text_inference:  { <...> }  # only version >= 1.3.0
   video_inference: { <...> }
+  # global durations
+  start: <float> 
+  end: <float>
+  start_ms: <int>
+  end_ms: <int>
+  TS: ["Thh:mm:ss.fff", "Thh:mm:ss.fff"]  # raw start/end timestamps
+  # information about total entries of each metadata source
+  total_merged: <int>   # number of objects in 'merged'
+  # total number of entries per different type of metadata source after merging strategy
+  total_merged_vd: <int>  
+  total_merged_ta: <int> 
+  total_merged_ti: <int> 
+  total_merged_vi: [<int>, ...] 
+  # original amount of entries per metadata source prior to merging resolution of timestamps
+  total_vd: <int> 
+  total_ta: <int> 
+  total_ti: <int> 
+  total_vi: [<int>, ...]  # according to number of input files provided for Video Inference
   
 merged:
   # First merged section (M1) 
