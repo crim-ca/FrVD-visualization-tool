@@ -10,6 +10,9 @@ ____________
   
 * Implement parsing and merging of Text Inference TSV files that provide action mappings between different types of 
   lexical resources, embeddings generation and reference gold standard definitions against the original VD action.
+  
+* Avoid initial metadata entries of each source to be incorrectly added during merge or displayed in viewer until 
+  the corresponding first start time is reached.
 
 [1.2.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.2.0) (2021-06-07)
 ------------------------------------------------------------------------------------------------------------------------

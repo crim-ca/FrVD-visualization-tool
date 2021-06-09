@@ -968,12 +968,6 @@ class VideoResultPlayerApp(object):
         ti_total = len(text_inference_time_metadata)
         vi_totals = [len(vi_meta) for vi_meta in video_inference_time_metadata]
         while True:
-            vd_txt = "(done)" if vd_index is None else "({}/{})".format(vd_index + 1, vd_total)
-            ta_txt = "(done)" if ta_index is None else "({}/{})".format(ta_index + 1, ta_total)
-            ti_txt = "(done)" if ti_index is None else "({}/{})".format(ti_index + 1, ti_total)
-            vi_txt = ", ".join(["(done)" if vi_i is None else "({}/{})".format(vi_i + 1, vi_t)
-                                for vi_i, vi_t in zip(vi_indices, vi_totals)])
-            LOGGER.debug("Merged: VI [%s] TA [%s] TI [%s] VI [%s]", vd_txt, ta_txt, ti_txt, vi_txt)
             new_entry = {self.ts_key: None, self.te_key: None,
                          self.vd_key: None, self.ta_key: None, self.ti_key: None, self.vi_key: None}
 
@@ -992,6 +986,13 @@ class VideoResultPlayerApp(object):
                 vi_start_multi.append(vi_start)
                 vi_end_multi.append(vi_end)
                 vi_entries.append(vi_entry)
+
+            vd_txt = "(done)" if vd_index is None else "({}/{})".format(vd_index + 1, vd_total)
+            ta_txt = "(done)" if ta_index is None else "({}/{})".format(ta_index + 1, ta_total)
+            ti_txt = "(done)" if ti_index is None else "({}/{})".format(ti_index + 1, ti_total)
+            vi_txt = ", ".join(["(done)" if vi_i is None else "({}/{})".format(vi_i + 1, vi_t)
+                                for vi_i, vi_t in zip(vi_indices, vi_totals)])
+            LOGGER.debug("Merged: VI [%s] TA [%s] TI [%s] VI [%s]", vd_txt, ta_txt, ti_txt, vi_txt)
 
             # check ending condition
             vd_done = vd_index is None or vd_index == vd_total
@@ -1014,14 +1015,13 @@ class VideoResultPlayerApp(object):
             end_time = round(min(filter(lambda end: end is not None, end_times)), self.precision)
 
             # remove entries until the first entry of corresponding type is reached
-            if 0:
-                vd_entry = vd_entry if vd_entry and (vd_start < last_time or vd_start == first_time) else None
-                ta_entry = ta_entry if ta_entry and (ta_start < last_time or ta_start == first_time) else None
-                ti_entry = ti_entry if ti_entry and (ti_start < last_time or ti_start == first_time) else None
-                vi_entries = [
-                    vi_entry if vi_entry and (vi_start < last_time or vi_start == first_time) else None
-                    for vi_entry, vi_start in zip(vi_entries, vi_start_multi)
-                ]
+            vd_entry = vd_entry if vd_entry and last_time >= vd_start else None
+            ta_entry = ta_entry if ta_entry and last_time >= ta_start else None
+            ti_entry = ti_entry if ti_entry and last_time >= ti_start else None
+            vi_entries = [
+                vi_entry if vi_entry and last_time >= vi_start else None
+                for vi_entry, vi_start in zip(vi_entries, vi_start_multi)
+            ]
 
             # update current metadata entry, empty if time is lower/greater than current portion
             # start times need to be computed after 'next_entry' call to find the start time of all meta portions
