@@ -165,7 +165,7 @@ merged:
   # First merged section (M1) 
   - start: <t0>         # real start time of merged M1 portion
     end: <t1>           # real end time of merged M1 portion
-    video_description   # (VD entry-1)
+    video_description:  # (VD entry-1)
       # VD metadata dump of the original file with extended details (e.g.: corrected timestamps formats)   
       vd:               # (VD entry-1)
         [...]
@@ -174,7 +174,7 @@ merged:
         start_ms: <t0>  # (in milliseconds)
         end_ms: <t3>    # (in milliseconds)
         start: <t0>     # (in seconds.fraction)
-        end": <t3>      # (in seconds.fraction)
+        end: <t3>      # (in seconds.fraction)
         start_ts: "Thh:mm:ss.fff"
         end_ts: "Thh:mm:ss.fff"
     text_annotation:    # (TA entry-1)
