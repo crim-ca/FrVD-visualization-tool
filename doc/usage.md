@@ -174,7 +174,7 @@ merged:
         start_ms: <t0>  # (in milliseconds)
         end_ms: <t3>    # (in milliseconds)
         start: <t0>     # (in seconds.fraction)
-        end": <t3>      # (in seconds.fraction)
+        end: <t3>      # (in seconds.fraction)
         start_ts: "Thh:mm:ss.fff"
         end_ts: "Thh:mm:ss.fff"
     text_annotation:    # (TA entry-1)
