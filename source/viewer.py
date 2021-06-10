@@ -1044,13 +1044,22 @@ class VideoResultPlayerApp(object):
             end_time = round(min(filter(lambda end: end is not None, end_times)), self.precision)
 
             # remove entries until the first entry of corresponding type is reached
-            vd_entry = vd_entry if vd_entry and last_time >= vd_start else None
-            ta_entry = ta_entry if ta_entry and last_time >= ta_start else None
-            ti_entry = ti_entry if ti_entry and last_time >= ti_start else None
+            vd_entry = vd_entry if vd_entry and end_time >= vd_start else None
+            ta_entry = ta_entry if ta_entry and end_time >= ta_start else None
+            ti_entry = ti_entry if ti_entry and end_time >= ti_start else None
             vi_entries = [
-                vi_entry if vi_entry and last_time >= vi_start else None
+                vi_entry if vi_entry and end_time >= vi_start else None
                 for vi_entry, vi_start in zip(vi_entries, vi_start_multi)
             ]
+            if all(entry is None for entry in [vd_entry, ta_entry, ti_entry] + vi_entries):
+                continue
+
+            # apply resolved merged start/end times
+            new_entry[self.ts_key] = last_time  # new entry starts where last one finished
+            new_entry[self.te_key] = end_time
+            new_entry["start"] = last_time / 1000.
+            new_entry["end"] = end_time / 1000.
+            new_entry["TS"] = [seconds2timestamp(new_entry["start"]), seconds2timestamp(new_entry["end"])]
 
             # update current metadata entry, empty if time is lower/greater than current portion
             # start times need to be computed after 'next_entry' call to find the start time of all meta portions
@@ -1066,7 +1075,7 @@ class VideoResultPlayerApp(object):
                 new_entry[self.ti_key] = ti_entry
                 new_entry[self.vi_key] = vi_entries
 
-            # apply current merged start/end times and add to list of merged metadata
+            # add to list of merged metadata
             new_entry[self.ts_key] = last_time
             new_entry[self.te_key] = end_time
             metadata["merged"].append(new_entry)

@@ -4,7 +4,9 @@
 ------------------------------------------------------------------------------------------------------------------------
 ____________
 
-* Nothing new for the moment.
+* Fix invalid alignment of different metadata sources that avoids pre-pending entries until the first occurrence 
+  start-time is reached against other sources. Start-time comparisons where incorrectly processed leading to missing 
+  metadata items. Issue was introduced in `1.3.0`. 
 
 [1.4.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.4.0) (2021-06-09)
 ------------------------------------------------------------------------------------------------------------------------
