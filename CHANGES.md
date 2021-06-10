@@ -4,7 +4,8 @@
 ------------------------------------------------------------------------------------------------------------------------
 ____________
 
-* Nothing new for the moment.
+* Disable key sorting when generating a merged metadata file in YAML format to preserve insertion order.
+* Fix minor typos in documentation.
 
 [1.4.1](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.4.1) (2021-06-10)
 ------------------------------------------------------------------------------------------------------------------------

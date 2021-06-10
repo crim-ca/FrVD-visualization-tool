@@ -30,7 +30,7 @@ def write_metafile(metadata, path):
         if path.endswith(".json"):
             json.dump(metadata, meta_file, indent=4, ensure_ascii=False)
         else:
-            yaml.safe_dump(metadata, meta_file)
+            yaml.safe_dump(metadata, meta_file, sort_keys=False)
 
 
 def split_sentences(text):
