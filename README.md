@@ -1,6 +1,6 @@
 # video-result-viewer
 
-<img alt="version-1.4.0" src="https://img.shields.io/badge/version-1.4.0-blue"/>
+<img alt="version-1.4.1" src="https://img.shields.io/badge/version-1.4.1-blue"/>
 
 Minimalistic video player that allows visualization and easier interpretation of FAR-VVD results. 
 
