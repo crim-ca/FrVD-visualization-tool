@@ -29,8 +29,11 @@ def write_metafile(metadata, path):
     with open(path, "w") as meta_file:
         if path.endswith(".json"):
             json.dump(metadata, meta_file, indent=4, ensure_ascii=False)
-        else:
+        elif path.endswith(".yml") or path.endswith(".yaml"):
             yaml.safe_dump(metadata, meta_file, sort_keys=False)
+        else:
+            meta_lines = [str(line) + "\n" for line in metadata]
+            meta_file.writelines(meta_lines)
 
 
 def split_sentences(text):
@@ -68,13 +71,29 @@ def timestamp2seconds(ts):
 def seconds2timestamp(sec):
     # type: (Union[int, float]) -> str
     """
-    Converts seconds into the corresponding ISO time.
+    Converts seconds into the corresponding ISO time (THH:MM:SS[.fffff]).
     """
     assert sec <= 86400, "Unsupported seconds longer then a day."
     ts = str(timedelta(seconds=sec))
     if (len(ts.split(".")[0])) == 7:
         ts = "0" + ts
     return "T" + ts
+
+
+def timestamp2srt(ts):
+    # type: (Union[datetime, str]) -> str
+    """
+    Converts a timestamp into an SRT compatible time (HH:MM:SS,fff).
+    """
+    if isinstance(ts, datetime):
+        ts = seconds2timestamp(timestamp2seconds(ts))
+    if "." in ts:
+        # adjust floating point representation
+        ts, ff = ts.split(".")
+        ts += "," + ff[:3]
+    else:
+        ts += ",000"
+    return ts[1:]  # remove 'T'
 
 
 def draw_bbox(image, tl, br, text, color,
