@@ -19,6 +19,7 @@ from utils import (
     seconds2timestamp,
     split_sentences,
     timestamp2seconds,
+    timestamp2srt,
     write_metafile
 )
 from typing import Any, Dict, List, Optional
@@ -129,7 +130,7 @@ class VideoResultPlayerApp(object):
 
     def __init__(self, video_file, video_description, video_inferences, text_annotations, text_inferences,
                  text_auto=None, merged_metadata_input=None, merged_metadata_output=None,
-                 mapping_file=None, use_references=False, output=None,
+                 mapping_file=None, vd_subtitles=None, use_references=False, output=None,
                  scale=1.0, queue_size=10, frame_drop_factor=4, frame_skip_factor=1):
         if video_file is not None:
             self.video_source = os.path.abspath(video_file)
@@ -158,6 +159,13 @@ class VideoResultPlayerApp(object):
         valid_meta = self.setup_metadata(video_description, video_inferences, text_annotations, text_inferences,
                                          text_auto, merged_metadata_input, merged_metadata_output,
                                          mapping_file, use_references)
+
+        if vd_subtitles and not self.video_desc_meta:
+            LOGGER.error("Requested SRT generation without VD metadata.")
+            raise ValueError("Cannot generate SRT output without any VD metadata.")
+        if vd_subtitles:
+            self.generate_srt(vd_subtitles)
+
         if not valid_meta:
             return
         if video_file is None:
@@ -739,6 +747,26 @@ class VideoResultPlayerApp(object):
         frame_path = os.path.join(self.frame_output, frame_name)
         cv.imwrite(frame_path, self.video_frame)
         LOGGER.info("Saved frame snapshot: [%s]", frame_path)
+
+    def generate_srt(self, output):
+        dir_path, srt_ext = os.path.splitext(output)
+        if not srt_ext:
+            srt_file = os.path.join(dir_path, "vd.srt")
+        else:
+            dir_path = os.path.dirname(output)
+            srt_file = output
+        os.makedirs(dir_path, exist_ok=True)
+        srt_meta = []
+        for i, vd in enumerate(self.video_desc_meta):
+            # For each SRT 'subtitle'
+            #   <magic-number>
+            #   <timestamp start> --> <timestamp end>
+            #   <VD>
+            #   <empty line>
+            # Timestamps formatted as:  HH:MM:SS,fff
+            srt_times = "{} --> {}".format(timestamp2srt(vd["start_ts"]), timestamp2srt(vd["end_ts"]))
+            srt_meta.extend([str(i), srt_times, vd["vd"], ""])
+        write_metafile(srt_meta, srt_file)
 
     def setup_colors(self):
         """
@@ -1415,18 +1443,23 @@ def make_parser():
                                       description="Options that configure extra functionalities.")
     util_opts.add_argument("--output", "-o", default="/tmp/video-result-viewer",
                            help="Output location of frame snapshots (default: [%(default)s]).")
-    util_opts.add_argument("--merged", "-m", dest="merged_metadata_output",
-                           help="Output path of generated merged metadata JSON/YAML file from all other metadata files "
-                                "from different sources with realigned timestamps of corresponding sections. "
-                                "Disabled if input metadata is already a merged file (--input-metadata).")
-    util_opts.add_argument("--references", "-R", dest="use_references", default=False, action="store_true",
-                           help="Indicates if JSON references ($ref) should be employed when generating merged "
-                                "metadata to avoid repeating elements. The merged content will use UUID links pointing "
-                                "to references that overlap across sections instead of copying them.")
-    util_opts.add_argument("--mapping", "--map", "-M", dest="mapping_file",
-                           help="JSON/YAML file with class name mapping. When provided, class names within "
-                                "text annotations and video inference metadata that correspond to a given key will "
-                                "be replaced for rendering and merged output by the respective value.")
+    out_opts = util_opts.add_mutually_exclusive_group()
+    out_opts.add_argument("--srt", "--vd-subtitles", dest="vd_subtitles",
+                          help="Generate an SRT file in specified location using annotated VD metadata file. "
+                               "Only employs required VD metadata, ignores any other provided metadata files.")
+    merge_opts = out_opts.add_argument_group(title="Merging Options")
+    merge_opts.add_argument("--merged", "-m", dest="merged_metadata_output",
+                            help="Output path of generated merged metadata JSON/YAML file from all other metadata "
+                                 "files from different sources with realigned timestamps of corresponding sections. "
+                                 "Disabled if input metadata is already a merged file (--input-metadata).")
+    merge_opts.add_argument("--references", "-R", dest="use_references", default=False, action="store_true",
+                            help="Indicates if JSON references ($ref) should be employed when generating merged "
+                                 "metadata to avoid repeating elements. The merged content will use UUID links "
+                                 "pointing to references that overlap across sections instead of copying them.")
+    merge_opts.add_argument("--mapping", "--map", "-M", dest="mapping_file",
+                            help="JSON/YAML file with class name mapping. When provided, class names within "
+                                 "text annotations and video inference metadata that correspond to a given key will "
+                                 "be replaced for rendering and merged output by the respective value.")
     video_opts = ap.add_argument_group(title="Video Options",
                                        description="Options that configure video processing.")
     video_opts.add_argument("--scale", "-s", type=float, default=VideoResultPlayerApp.video_scale,
