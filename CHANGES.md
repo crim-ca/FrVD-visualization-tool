@@ -4,6 +4,12 @@
 ------------------------------------------------------------------------------------------------------------------------
 ____________
 
+* Nothing new for the moment.
+
+[1.5.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.5.0) (2021-06-14)
+------------------------------------------------------------------------------------------------------------------------
+____________
+
 * Add `--srt`/`--vd-subtitles` option that allows generation of an SRT *subtitles*-like file, but using 
   Video Description (VD) metadata instead of traditional dialogue text. This metadata can be combined to most typical
   video players (eg: VLC) to rapidly display the video and annotated VD. 
