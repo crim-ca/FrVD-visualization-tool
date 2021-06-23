@@ -4,6 +4,12 @@
 ------------------------------------------------------------------------------------------------------------------------
 ____________
 
+* Nothing new for the moment.
+
+[1.5.1](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.5.1) (2021-06-23)
+------------------------------------------------------------------------------------------------------------------------
+____________
+
 * Removed `tkinter` module incorrectly listed in requirement as package. It is preinstalled with Python. 
 
 [1.5.0](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.5.0) (2021-06-14)
