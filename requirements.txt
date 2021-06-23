@@ -1,5 +1,4 @@
 jsonref
 opencv-python
 Pillow
-tkinter
 pyyaml>=5.1
