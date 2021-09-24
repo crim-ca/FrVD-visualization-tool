@@ -1,6 +1,6 @@
 # video-result-viewer
 
-![version][version-badge] [![license][license-badge]](./LICENSE)
+![version][version-badge] [![CC BY-NC-SA 4.0][cc-by-nc-sa-shield]][license]
 
 [version-badge]: https://img.shields.io/badge/version-1.5.1-blue
 [license-badge]: https://img.shields.io/badge/license-%20CC%20BY--NC--SA%204.0-blue
@@ -56,3 +56,21 @@ Please refer to [format details](./doc/metadata_format.md).
 ## Installation and Execution
 
 Please refer to [usage details](./doc/usage.md#Installation).
+
+## License
+
+[![CC BY-NC-SA 4.0][cc-by-nc-sa-shield]][license]
+<br>
+This work is licensed under a
+[Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License][cc-by-nc-sa].
+
+[![CC BY-NC-SA 4.0][cc-by-nc-sa-image]][cc-by-nc-sa]
+
+[license]: ./LICENSE
+[cc-by-nc-sa]: http://creativecommons.org/licenses/by-nc-sa/4.0/
+[cc-by-nc-sa-image]: https://licensebuttons.net/l/by-nc-sa/4.0/88x31.png
+[cc-by-nc-sa-shield]: https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg
+
+## Citation
+
+Please refer to [FrVD dataset citation](https://github.com/crim-ca/FrVD#citation).
