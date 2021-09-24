@@ -1,6 +1,9 @@
 # video-result-viewer
 
-<img alt="version-1.5.1" src="https://img.shields.io/badge/version-1.5.1-blue"/>
+![version][version-badge] [![license][license-badge]](./LICENSE)
+
+[version-badge]: https://img.shields.io/badge/version-1.5.1-blue
+[license-badge]: https://img.shields.io/badge/license-%20CC%20BY--NC--SA%204.0-blue
 
 Minimalistic video player that allows visualization, easier interpretation and analysis of synchronized metadata
 from [FrVD][FrVD] dataset annotations and corresponding video files.
