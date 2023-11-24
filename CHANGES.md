@@ -6,6 +6,12 @@ ____________
 
 * Nothing new for the moment.
 
+[1.5.2](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.5.2) (2023-11-24)
+------------------------------------------------------------------------------------------------------------------------
+____________
+
+* Update `pillow>=9.5.0` dependency to fix issued security vulnerability.
+
 [1.5.1](https://www.crim.ca/stash/projects/FAR/repos/video-result-viewer/browse?at=refs/tags/1.5.1) (2021-06-23)
 ------------------------------------------------------------------------------------------------------------------------
 ____________

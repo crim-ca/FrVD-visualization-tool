@@ -1,4 +1,4 @@
 jsonref
 opencv-python
-Pillow
+pillow>=9.5.0
 pyyaml>=5.1

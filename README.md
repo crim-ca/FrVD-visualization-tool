@@ -2,7 +2,7 @@
 
 ![version][version-badge] [![CC BY-NC-SA 4.0][cc-by-nc-sa-shield]][license]
 
-[version-badge]: https://img.shields.io/badge/version-1.5.1-blue
+[version-badge]: https://img.shields.io/badge/version-1.5.2-blue
 [license-badge]: https://img.shields.io/badge/license-%20CC%20BY--NC--SA%204.0-blue
 
 Minimalistic video player that allows visualization, easier interpretation and analysis of synchronized metadata
